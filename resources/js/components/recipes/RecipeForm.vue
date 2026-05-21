@@ -414,7 +414,25 @@ const populateFromImportPreview = (data) => {
     typeof step === 'string' ? step : (step.text || '')
   )
   form.tag_ids = []
-  form.allergens = []
+
+  // AI-suggested allergens come in as {slug, presence, confidence}. Translate
+  // them to the form's shape using the loaded allergen list. If the allergens
+  // store hasn't loaded yet, do it now and re-populate when it arrives.
+  const mapAiAllergens = () => {
+    const bySlug = new Map((allergensStore.allergens || []).map((a) => [a.slug, a.id]))
+    form.allergens = (data.allergens || [])
+      .map((entry) => ({
+        allergen_id: bySlug.get(entry.slug),
+        presence: entry.presence || 'contains',
+      }))
+      .filter((entry) => entry.allergen_id)
+  }
+
+  if (foodEnabled.value && allergensStore.allergens.length === 0) {
+    allergensStore.fetchAllergens().then(mapAiAllergens)
+  } else {
+    mapAiAllergens()
+  }
 }
 
 // ── Ingredient actions ──

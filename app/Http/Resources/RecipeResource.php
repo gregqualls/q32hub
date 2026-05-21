@@ -44,6 +44,7 @@ class RecipeResource extends JsonResource
 
                 return [
                     'id' => $a->id,
+                    'pivot_id' => $pivot->id,
                     'name' => $a->name,
                     'slug' => $a->slug,
                     'is_big_nine' => (bool) $a->is_big_nine,

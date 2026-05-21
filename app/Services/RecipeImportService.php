@@ -2,12 +2,15 @@
 
 namespace App\Services;
 
+use App\Enums\AllergenSource;
+use App\Models\Allergen;
 use App\Models\Family;
 use App\Models\Recipe;
 use App\Models\User;
 use App\Rules\FractionalQuantity;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -22,7 +25,41 @@ class RecipeImportService
 
     private const MAX_TOKENS = 2048;
 
-    private const URL_SYSTEM_PROMPT = <<<'PROMPT'
+    private const ALLERGEN_THRESHOLD_AUTO = 0.95;
+
+    /**
+     * Allergen-extraction instructions injected into both prompts.
+     * Slugs are dynamic per family (Big 9 + custom rows).
+     */
+    private static function allergenPromptSection(array $allergenSlugs): string
+    {
+        $list = empty($allergenSlugs) ? '(none configured)' : '- '.implode("\n- ", $allergenSlugs);
+
+        return <<<PROMPT
+
+Also identify which of these allergens the recipe likely contains, based on the ingredients:
+{$list}
+
+Add to the JSON:
+"allergens": [
+  {"slug": "peanuts", "presence": "contains", "confidence": 0.98},
+  {"slug": "milk", "presence": "may_contain", "confidence": 0.6}
+]
+
+Allergen rules:
+- Only use slugs from the list above. Do not invent slugs.
+- presence: "contains" when the allergen is an explicit ingredient. "may_contain" only for clear cross-contamination cues (e.g. "made in a facility that also processes peanuts").
+- confidence: 0.0–1.0, your estimate of how likely the allergen is present given the ingredient list. Be conservative — a 1.0 means absolutely certain.
+- Omit anything below ~0.3 confidence. Empty array if none detected.
+- For wheat/gluten check explicitly: flour, bread, pasta, soy sauce, beer.
+- For milk check: butter, cream, cheese, yogurt, ghee.
+- For eggs check: mayo, custard, baked goods using eggs as a binder.
+PROMPT;
+    }
+
+    private static function urlSystemPrompt(array $allergenSlugs): string
+    {
+        return <<<'PROMPT'
 You are a recipe extraction assistant. Extract a structured recipe from the following web page content.
 
 Return a JSON object with EXACTLY these fields:
@@ -56,9 +93,13 @@ Other rules:
 - If a field is not found, set it to null (except title and instructions which are required).
 - Instructions should be clean step strings without numbering prefixes.
 - Return valid JSON only. No markdown, no explanation.
-PROMPT;
+PROMPT
+            .self::allergenPromptSection($allergenSlugs);
+    }
 
-    private const PHOTO_PROMPT = <<<'PROMPT'
+    private static function photoPrompt(array $allergenSlugs): string
+    {
+        return <<<'PROMPT'
 Extract a structured recipe from this image. Return JSON with:
 {
   "title": "Recipe title",
@@ -78,7 +119,9 @@ CRITICAL: The `name` field must contain ONLY the ingredient name — never the q
 Convert fractions to decimals: 1/2 → "0.5", 1/4 → "0.25", 3/4 → "0.75".
 If any field cannot be determined, set it to null.
 Return valid JSON only.
-PROMPT;
+PROMPT
+            .self::allergenPromptSection($allergenSlugs);
+    }
 
     public function __construct(
         private RecipeService $recipeService,
@@ -95,12 +138,26 @@ PROMPT;
         $html = $this->fetchUrl($url);
 
         $data = $this->parseJsonLd($html);
+        $usedLlm = false;
 
         if ($data === null) {
             $data = $this->extractViaLlm($html, $family);
+            $usedLlm = true;
         }
 
         $this->validateExtracted($data);
+
+        // JSON-LD paths skip the LLM entirely, so they have no allergen data.
+        // Run an ingredient-only allergen pass so the import is consistent.
+        // Silently no-ops if the family has no AI configured (BYOK off, etc.).
+        if (! $usedLlm && empty($data['allergens']) && ! empty($data['ingredients'])) {
+            try {
+                $data['allergens'] = $this->extractAllergensFromIngredients($data['ingredients'], $family);
+            } catch (\Throwable $e) {
+                Log::info('RecipeImportService: allergen pass skipped after JSON-LD', ['reason' => $e->getMessage()]);
+                $data['allergens'] = [];
+            }
+        }
 
         $data['source_url'] = $url;
         $data['source_type'] = 'url';
@@ -513,7 +570,7 @@ PROMPT;
         ])->timeout(60)->post(self::ANTHROPIC_API_URL, [
             'model' => $model,
             'max_tokens' => self::MAX_TOKENS,
-            'system' => self::URL_SYSTEM_PROMPT,
+            'system' => self::urlSystemPrompt($this->familyAllergenSlugs($family)),
             'messages' => [
                 ['role' => 'user', 'content' => $cleaned],
             ],
@@ -570,7 +627,7 @@ PROMPT;
                         ],
                         [
                             'type' => 'text',
-                            'text' => self::PHOTO_PROMPT,
+                            'text' => self::photoPrompt($this->familyAllergenSlugs($family)),
                         ],
                     ],
                 ],
@@ -587,6 +644,171 @@ PROMPT;
         $this->trackUsage($family, $response->json('usage'));
 
         return $this->parseLlmResponse($response->json());
+    }
+
+    /**
+     * Slugs available to this family for AI allergen tagging. Global Big 9 +
+     * the family's custom rows. Stable order so prompt caching has a chance.
+     */
+    private function familyAllergenSlugs(Family $family): array
+    {
+        return Allergen::availableToFamily((string) $family->id)
+            ->orderByDesc('is_big_nine')
+            ->orderBy('slug')
+            ->pluck('slug')
+            ->all();
+    }
+
+    /**
+     * Run AI allergen extraction over a free-form ingredient list. Used by the
+     * artisan backfill to scan existing recipes without re-fetching their HTML.
+     * Returns an array of `{slug, presence, confidence}` or [].
+     *
+     * @param  array<int, array{name?: string, quantity?: string, unit?: string, preparation?: string}>  $ingredients
+     * @return array<int, array{slug: string, presence: string, confidence: float}>
+     */
+    public function extractAllergensFromIngredients(array $ingredients, Family $family): array
+    {
+        $slugs = $this->familyAllergenSlugs($family);
+        if (empty($slugs) || empty($ingredients)) {
+            return [];
+        }
+
+        $apiKey = $this->resolveApiKey($family);
+        $model = $this->resolveModel($family);
+
+        $lines = collect($ingredients)
+            ->map(fn ($i) => trim(($i['quantity'] ?? '').' '.($i['unit'] ?? '').' '.($i['name'] ?? '').($i['preparation'] ? ', '.$i['preparation'] : '')))
+            ->filter()
+            ->implode("\n");
+
+        $system = 'You are an allergen-detection assistant. Identify allergens present in a recipe given its ingredient list. '.self::allergenPromptSection($slugs).
+            ' Return JSON with EXACTLY one field: {"allergens": [...]}';
+
+        $response = Http::withHeaders([
+            'x-api-key' => $apiKey,
+            'anthropic-version' => self::ANTHROPIC_VERSION,
+            'Content-Type' => 'application/json',
+        ])->timeout(60)->post(self::ANTHROPIC_API_URL, [
+            'model' => $model,
+            'max_tokens' => 512,
+            'system' => $system,
+            'messages' => [['role' => 'user', 'content' => $lines]],
+        ]);
+
+        if ($response->failed()) {
+            Log::error('RecipeImportService: allergen-only extraction failed', ['status' => $response->status()]);
+
+            return [];
+        }
+
+        $this->trackUsage($family, $response->json('usage'));
+
+        $parsed = $this->parseLlmResponse($response->json());
+
+        return $this->normalizeAllergens($parsed['allergens'] ?? [], $slugs);
+    }
+
+    /**
+     * Validate AI-returned allergens against the family's slug list. Drops
+     * unknown slugs, invalid presence values, malformed confidence scores.
+     *
+     * @param  array<mixed>  $raw
+     * @param  array<int, string>  $allowedSlugs
+     * @return array<int, array{slug: string, presence: string, confidence: float}>
+     */
+    private function normalizeAllergens(array $raw, array $allowedSlugs): array
+    {
+        $allowed = array_flip($allowedSlugs);
+        $out = [];
+
+        foreach ($raw as $entry) {
+            $slug = $entry['slug'] ?? null;
+            $presence = $entry['presence'] ?? null;
+            $confidence = $entry['confidence'] ?? null;
+
+            if (! is_string($slug) || ! isset($allowed[$slug])) {
+                continue;
+            }
+            if (! in_array($presence, ['contains', 'may_contain'], true)) {
+                continue;
+            }
+            if (! is_numeric($confidence)) {
+                continue;
+            }
+            $confidence = max(0.0, min(1.0, (float) $confidence));
+
+            $out[] = ['slug' => $slug, 'presence' => $presence, 'confidence' => $confidence];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Persist a normalized allergen list onto a recipe with AI provenance.
+     * Confidence ≥ ALLERGEN_THRESHOLD_AUTO → source = ai_auto. Otherwise
+     * source = ai_suggested. Idempotent on (recipe, allergen, presence).
+     *
+     * Returns the number of rows written.
+     *
+     * @param  array<int, array{slug: string, presence: string, confidence: float}>  $allergens
+     */
+    public function persistAiAllergens(Recipe $recipe, array $allergens): int
+    {
+        if (empty($allergens)) {
+            return 0;
+        }
+
+        $slugToId = Allergen::availableToFamily($recipe->family_id)
+            ->pluck('id', 'slug');
+
+        $now = now();
+        $written = 0;
+        $seen = [];
+
+        foreach ($allergens as $entry) {
+            $allergenId = $slugToId[$entry['slug']] ?? null;
+            if (! $allergenId) {
+                continue;
+            }
+            $dedupeKey = $allergenId.'|'.$entry['presence'];
+            if (isset($seen[$dedupeKey])) {
+                continue;
+            }
+            $seen[$dedupeKey] = true;
+
+            $source = $entry['confidence'] >= self::ALLERGEN_THRESHOLD_AUTO
+                ? AllergenSource::AiAuto->value
+                : AllergenSource::AiSuggested->value;
+
+            // Skip if a row with this (recipe, allergen, presence) already exists —
+            // preserves human edits and keeps the operation safe to re-run.
+            $exists = DB::table('recipe_allergens')
+                ->where('recipe_id', $recipe->id)
+                ->where('allergen_id', $allergenId)
+                ->where('presence', $entry['presence'])
+                ->exists();
+
+            if ($exists) {
+                continue;
+            }
+
+            DB::table('recipe_allergens')->insert([
+                'id' => (string) Str::uuid(),
+                'recipe_id' => $recipe->id,
+                'allergen_id' => $allergenId,
+                'presence' => $entry['presence'],
+                'source' => $source,
+                'confidence' => $entry['confidence'],
+                'confirmed_by' => null,
+                'confirmed_at' => null,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+            $written++;
+        }
+
+        return $written;
     }
 
     /**
@@ -671,6 +893,15 @@ PROMPT;
         ];
 
         $recipe = $this->recipeService->createRecipe($family, $user, $recipeData);
+
+        // AI-suggested allergens get persisted with their provenance. The recipe
+        // detail view surfaces them as "AI tagged" until a human confirms (or
+        // the user edits the recipe via the form, which rewrites as human_confirmed).
+        $allergens = $this->normalizeAllergens($data['allergens'] ?? [], $this->familyAllergenSlugs($family));
+        if (! empty($allergens)) {
+            $this->persistAiAllergens($recipe, $allergens);
+            $recipe->load('allergens');
+        }
 
         return ['recipe' => $recipe];
     }

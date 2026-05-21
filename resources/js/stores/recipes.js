@@ -145,6 +145,25 @@ export const useRecipesStore = defineStore('recipes', () => {
     }
   }
 
+  // Confirm an AI-tagged allergen (ai_auto / ai_suggested → human_confirmed).
+  // Updates the recipe in place so the badge re-renders without a refetch.
+  const confirmAllergen = async (recipeId, pivotId) => {
+    try {
+      await api.patch(`/recipes/${recipeId}/allergens/${pivotId}`)
+      const stamp = (recipe) => {
+        if (!recipe?.allergens) return
+        const hit = recipe.allergens.find((a) => a.id && a.pivot_id === pivotId)
+        if (hit) hit.source = 'human_confirmed'
+      }
+      stamp(currentRecipe.value)
+      const inList = recipes.value.find((r) => r.id === recipeId)
+      stamp(inList)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err.response?.data?.message || 'Failed to confirm allergen' }
+    }
+  }
+
   const toggleFavorite = async (id) => {
     // Optimistic update
     const index = recipes.value.findIndex((r) => r.id === id)
@@ -288,6 +307,7 @@ export const useRecipesStore = defineStore('recipes', () => {
     selectedTagIds,
     showFavoritesOnly,
     safeForMemberIds,
+    confirmAllergen,
 
     // Computed
     hasMore,
