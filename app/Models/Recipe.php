@@ -85,6 +85,21 @@ class Recipe extends Model
             ->withTimestamps();
     }
 
+    public function images(): HasMany
+    {
+        return $this->hasMany(RecipeImage::class)->orderBy('sort_order')->orderBy('created_at');
+    }
+
+    /**
+     * Path of the recipe's primary image. Reads from `recipes.image_path`
+     * (kept in sync as a denormalized cache) so existing callers don't break.
+     * Returns null if the recipe has no images.
+     */
+    public function primaryImagePath(): ?string
+    {
+        return $this->image_path ?: null;
+    }
+
     public function scopeForFamily($query, string $familyId): void
     {
         $query->where('family_id', $familyId);

@@ -71,8 +71,8 @@
         />
       </div>
 
-      <!-- Photo -->
-      <PhotoUpload v-model="imageDisplayUrl" label="Photo" :uploader="uploadRecipeImage" />
+      <!-- Photos (multi-image gallery) -->
+      <RecipeImageGallery v-model="form.images" :uploader="uploadRecipeImage" />
     </div>
 
     <!-- Ingredients -->
@@ -272,7 +272,7 @@ import { useRecipesStore } from '@/stores/recipes'
 import { useAllergensStore } from '@/stores/allergens'
 import { useAuthStore } from '@/stores/auth'
 import { XMarkIcon } from '@heroicons/vue/24/outline'
-import PhotoUpload from '@/components/food/PhotoUpload.vue'
+import RecipeImageGallery from '@/components/recipes/RecipeImageGallery.vue'
 
 // Convert a decimal like 0.5 to a display string like "1/2" for common fractions.
 // Used when loading stored recipes into the form.
@@ -339,7 +339,6 @@ const foodEnabled = computed(() => authStore.userCanAccessModule('food'))
 const recipeTags = computed(() => allTags.value)
 
 const saving = ref(false)
-const imageDisplayUrl = ref(null)
 
 const createEmptyForm = () => ({
   title: '',
@@ -349,12 +348,12 @@ const createEmptyForm = () => ({
   cook_time_minutes: null,
   source_url: '',
   source_type: 'manual',
-  image_path: null,
   notes: '',
   ingredients: [],
   instructions: [],
   tag_ids: [],
   allergens: [], // [{ allergen_id, presence }]
+  images: [],    // [{ id?, path, sort_order, is_primary }]
 })
 
 const form = reactive(createEmptyForm())
@@ -367,11 +366,17 @@ const populateFromRecipe = (recipe) => {
   form.cook_time_minutes = recipe.cook_time_minutes || null
   form.source_url = recipe.source_url || ''
   form.source_type = recipe.source_type || 'manual'
-  form.image_path = recipe.image_path || null
   form.notes = recipe.notes || ''
-  if (recipe.image_path) {
-    imageDisplayUrl.value = `/storage/${recipe.image_path}`
-  }
+  // Hydrate the gallery. If the recipe was migrated from the old single-image
+  // column, recipe.images is already a single primary entry.
+  form.images = (recipe.images && recipe.images.length > 0)
+    ? recipe.images.map((img) => ({
+        id: img.id,
+        path: img.path,
+        sort_order: img.sort_order,
+        is_primary: img.is_primary,
+      }))
+    : (recipe.image_path ? [{ path: recipe.image_path, sort_order: 0, is_primary: true }] : [])
   form.ingredients = (recipe.ingredients || []).map((ing) => ({
     name: ing.name || '',
     quantity: decimalToFraction(ing.quantity),
@@ -398,10 +403,7 @@ const populateFromImportPreview = (data) => {
   form.cook_time_minutes = data.cook_time || data.cook_time_minutes || null
   form.source_url = data.source_url || ''
   form.source_type = data.source_type || 'url'
-  form.image_path = data.image_path || null
-  if (data.image_path) {
-    imageDisplayUrl.value = `/storage/${data.image_path}`
-  }
+  form.images = data.image_path ? [{ path: data.image_path, sort_order: 0, is_primary: true }] : []
   form.ingredients = (data.ingredients || []).map((ing) => ({
     name: ing.name || '',
     quantity: decimalToFraction(ing.quantity),
@@ -455,14 +457,13 @@ const removeInstruction = (index) => {
   form.instructions.splice(index, 1)
 }
 
-// ── Image upload (used by PhotoUpload component) ──
+// ── Image upload (used by RecipeImageGallery) ──
 
 const uploadRecipeImage = async (file) => {
   const result = await recipesStore.uploadImage(file)
   if (result.success) {
-    form.image_path = result.imagePath
-    imageDisplayUrl.value = `/storage/${result.imagePath}`
-    return { success: true, url: imageDisplayUrl.value }
+    // Gallery owns the form.images array; return just the path so it can append.
+    return { success: true, url: result.imagePath }
   }
   return { success: false }
 }
@@ -525,7 +526,6 @@ const handleSubmit = () => {
     cook_time_minutes: form.cook_time_minutes || null,
     source_url: form.source_url || null,
     source_type: form.source_type || 'manual',
-    image_path: form.image_path || null,
     notes: form.notes || null,
     ingredients: form.ingredients
       .filter((ing) => ing.name.trim())
@@ -543,6 +543,12 @@ const handleSubmit = () => {
       .map((text, idx) => ({ step: idx + 1, text: text.trim() })),
     tag_ids: form.tag_ids,
     allergens: form.allergens,
+    images: (form.images || []).map((img, idx) => ({
+      id: img.id || undefined,
+      path: img.path,
+      sort_order: idx,
+      is_primary: idx === 0,
+    })),
   }
 
   emit('save', payload)

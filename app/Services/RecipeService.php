@@ -47,7 +47,14 @@ class RecipeService
             $this->syncAllergens($recipe, $user, $data['allergens'] ?? []);
         }
 
-        return $recipe->load(['ingredients', 'tags', 'allergens', 'creator']);
+        if (array_key_exists('images', $data)) {
+            $this->syncImages($recipe, $data['images'] ?? []);
+        } elseif (! empty($data['image_path'])) {
+            // Backwards-compat: a single image_path becomes the primary image.
+            $this->syncImages($recipe, [['path' => $data['image_path'], 'is_primary' => true]]);
+        }
+
+        return $recipe->load(['ingredients', 'tags', 'allergens', 'images', 'creator']);
     }
 
     public function updateRecipe(Recipe $recipe, array $data): Recipe
@@ -80,7 +87,11 @@ class RecipeService
             $this->syncAllergens($recipe, $editor, $data['allergens'] ?? []);
         }
 
-        return $recipe->load(['ingredients', 'tags', 'allergens', 'creator']);
+        if (array_key_exists('images', $data)) {
+            $this->syncImages($recipe, $data['images'] ?? []);
+        }
+
+        return $recipe->load(['ingredients', 'tags', 'allergens', 'images', 'creator']);
     }
 
     public function deleteRecipe(Recipe $recipe): void
@@ -168,7 +179,7 @@ class RecipeService
 
         $perPage = min((int) ($filters['per_page'] ?? 20), 100);
 
-        return $query->with(['ingredients', 'tags', 'allergens', 'creator', 'ratings'])->paginate($perPage);
+        return $query->with(['ingredients', 'tags', 'allergens', 'images', 'creator', 'ratings'])->paginate($perPage);
     }
 
     /**
@@ -207,6 +218,78 @@ class RecipeService
             ->pluck('allergen_id')
             ->unique()
             ->values();
+    }
+
+    /**
+     * Sync a recipe's images. The form sends the full ordered list each time;
+     * we diff against the existing rows so paths the form still references
+     * stay put (with their IDs preserved), new paths get rows, removed paths
+     * get deleted. recipes.image_path stays in sync with the primary as a
+     * denormalized cache for cards / cross-cutting readers.
+     *
+     * Accepted entry shapes:
+     *   - { id?: string, path: string, sort_order?: int, is_primary?: bool }
+     *
+     * If no `is_primary` flag is set on any entry, the first one becomes primary.
+     */
+    private function syncImages(Recipe $recipe, array $images): void
+    {
+        $existingById = $recipe->images()->get()->keyBy('id');
+        $now = now();
+        $keptIds = [];
+        $primaryPath = null;
+
+        foreach (array_values($images) as $idx => $entry) {
+            $path = $entry['path'] ?? null;
+            if (! is_string($path) || $path === '') {
+                continue;
+            }
+            $sortOrder = $entry['sort_order'] ?? $idx;
+            $isPrimary = (bool) ($entry['is_primary'] ?? false);
+            $existing = isset($entry['id']) ? $existingById->get($entry['id']) : null;
+
+            if ($existing) {
+                $existing->fill([
+                    'path' => $path,
+                    'sort_order' => $sortOrder,
+                    'is_primary' => $isPrimary,
+                ])->save();
+                $keptIds[] = $existing->id;
+            } else {
+                $row = $recipe->images()->create([
+                    'path' => $path,
+                    'sort_order' => $sortOrder,
+                    'is_primary' => $isPrimary,
+                ]);
+                $keptIds[] = $row->id;
+            }
+
+            if ($isPrimary && ! $primaryPath) {
+                $primaryPath = $path;
+            }
+        }
+
+        // Drop removed rows
+        $recipe->images()->whereNotIn('id', $keptIds ?: ['00000000-0000-0000-0000-000000000000'])->delete();
+
+        // If no explicit primary, fall back to the first remaining row
+        if (! $primaryPath) {
+            $first = $recipe->images()->orderBy('sort_order')->first();
+            if ($first) {
+                if (! $first->is_primary) {
+                    $first->forceFill(['is_primary' => true])->save();
+                }
+                $primaryPath = $first->path;
+            }
+        } else {
+            // Make sure only one row is marked primary in the DB
+            $recipe->images()->where('path', '!=', $primaryPath)->update(['is_primary' => false]);
+        }
+
+        // Sync the denormalized cache so cards keep working
+        $recipe->forceFill(['image_path' => $primaryPath])->save();
+
+        unset($now);
     }
 
     /**

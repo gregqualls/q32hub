@@ -25,6 +25,12 @@ class RecipeResource extends JsonResource
             'source_url' => $this->source_url,
             'source_type' => $this->source_type,
             'image_path' => $this->image_path,
+            'images' => $this->whenLoaded('images', fn () => $recipe->images->map(fn ($img) => [
+                'id' => $img->id,
+                'path' => $img->path,
+                'sort_order' => $img->sort_order,
+                'is_primary' => (bool) $img->is_primary,
+            ])->values()),
             'instructions' => $this->instructions,
             'notes' => $this->notes,
             'is_favorite' => $this->is_favorite,
