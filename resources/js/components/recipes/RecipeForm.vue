@@ -215,6 +215,25 @@
       </div>
     </div>
 
+    <!-- Allergens -->
+    <div v-if="foodEnabled && allergensStore.allergens.length > 0">
+      <label class="block text-sm font-semibold text-ink-primary mb-1">Allergens</label>
+      <p class="text-xs text-ink-secondary mb-2">
+        Tap once for "contains", twice for "may contain", three times to clear.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <button
+          v-for="allergen in allergensStore.allergens"
+          :key="allergen.id"
+          type="button"
+          :class="allergenChipClass(allergen.id)"
+          @click="cycleAllergen(allergen.id)"
+        >
+          {{ allergenChipLabel(allergen) }}
+        </button>
+      </div>
+    </div>
+
     <!-- Notes -->
     <div>
       <label class="block text-sm font-medium text-ink-primary mb-1">Notes</label>
@@ -250,6 +269,8 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRecipesStore } from '@/stores/recipes'
+import { useAllergensStore } from '@/stores/allergens'
+import { useAuthStore } from '@/stores/auth'
 import { XMarkIcon } from '@heroicons/vue/24/outline'
 import PhotoUpload from '@/components/food/PhotoUpload.vue'
 
@@ -308,7 +329,11 @@ const props = defineProps({
 const emit = defineEmits(['save', 'cancel'])
 
 const recipesStore = useRecipesStore()
+const allergensStore = useAllergensStore()
+const authStore = useAuthStore()
 const { tags: allTags } = storeToRefs(recipesStore)
+
+const foodEnabled = computed(() => authStore.userCanAccessModule('food'))
 
 // Server returns only food-scoped tags via the recipes store.
 const recipeTags = computed(() => allTags.value)
@@ -329,6 +354,7 @@ const createEmptyForm = () => ({
   ingredients: [],
   instructions: [],
   tag_ids: [],
+  allergens: [], // [{ allergen_id, presence }]
 })
 
 const form = reactive(createEmptyForm())
@@ -358,6 +384,10 @@ const populateFromRecipe = (recipe) => {
     typeof step === 'string' ? step : (step.text || '')
   )
   form.tag_ids = (recipe.tags || []).map((t) => t.id)
+  form.allergens = (recipe.allergens || []).map((a) => ({
+    allergen_id: a.id,
+    presence: a.presence || 'contains',
+  }))
 }
 
 const populateFromImportPreview = (data) => {
@@ -384,6 +414,7 @@ const populateFromImportPreview = (data) => {
     typeof step === 'string' ? step : (step.text || '')
   )
   form.tag_ids = []
+  form.allergens = []
 }
 
 // ── Ingredient actions ──
@@ -429,6 +460,38 @@ const toggleTag = (tagId) => {
   }
 }
 
+// ── Allergen tri-state cycle: off → contains → may_contain → off ──
+
+const allergenState = (id) => {
+  const entry = form.allergens.find((a) => a.allergen_id === id)
+  return entry?.presence || 'off'
+}
+
+const cycleAllergen = (id) => {
+  const idx = form.allergens.findIndex((a) => a.allergen_id === id)
+  if (idx === -1) {
+    form.allergens.push({ allergen_id: id, presence: 'contains' })
+  } else if (form.allergens[idx].presence === 'contains') {
+    form.allergens[idx] = { allergen_id: id, presence: 'may_contain' }
+  } else {
+    form.allergens.splice(idx, 1)
+  }
+}
+
+const allergenChipClass = (id) => {
+  const base = 'px-3 py-1.5 text-xs font-medium rounded-full border transition-colors'
+  const state = allergenState(id)
+  if (state === 'contains') return `${base} bg-status-error/10 text-status-error border-status-error/40`
+  if (state === 'may_contain') return `${base} bg-status-warning/10 text-status-warning border-status-warning/40 border-dashed`
+  return `${base} bg-surface-sunken text-ink-secondary border-transparent hover:bg-surface-overlay`
+}
+
+const allergenChipLabel = (allergen) => {
+  const state = allergenState(allergen.id)
+  if (state === 'may_contain') return `May contain ${allergen.name.toLowerCase()}`
+  return allergen.name
+}
+
 // ── Submit ──
 
 const handleSubmit = () => {
@@ -461,6 +524,7 @@ const handleSubmit = () => {
       .filter((s) => s.trim())
       .map((text, idx) => ({ step: idx + 1, text: text.trim() })),
     tag_ids: form.tag_ids,
+    allergens: form.allergens,
   }
 
   emit('save', payload)
@@ -482,6 +546,11 @@ onMounted(() => {
   // Ensure tags are loaded
   if (allTags.value.length === 0) {
     recipesStore.fetchTags()
+  }
+
+  // Load allergens (food module gating already enforced at API level)
+  if (foodEnabled.value && allergensStore.allergens.length === 0) {
+    allergensStore.fetchAllergens()
   }
 })
 

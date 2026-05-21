@@ -1,14 +1,22 @@
 <template>
-  <FoodCard
-    :title="recipe.title"
-    :image-url="recipe.image_path"
-    :fallback-gradient="fallbackGradient"
-    :is-favorite="!!recipe.is_favorite"
-    :meta-items="metaItems"
-    :tags="recipe.tags || []"
-    @click="$router.push({ name: 'RecipeDetail', params: { id: recipe.id } })"
-    @toggle-favorite="$emit('toggleFavorite', recipe.id)"
-  />
+  <div>
+    <FoodCard
+      :title="recipe.title"
+      :image-url="recipe.image_path"
+      :fallback-gradient="fallbackGradient"
+      :is-favorite="!!recipe.is_favorite"
+      :meta-items="metaItems"
+      :tags="recipe.tags || []"
+      @click="$router.push({ name: 'RecipeDetail', params: { id: recipe.id } })"
+      @toggle-favorite="$emit('toggleFavorite', recipe.id)"
+    />
+    <AllergenBadgeRow
+      v-if="recipe.allergens && recipe.allergens.length"
+      :allergens="recipe.allergens"
+      :limit="3"
+      class="mt-2 px-1"
+    />
+  </div>
 </template>
 
 <script setup>
@@ -19,6 +27,7 @@ import {
   StarIcon,
 } from '@heroicons/vue/24/outline'
 import FoodCard from '@/components/food/FoodCard.vue'
+import AllergenBadgeRow from '@/components/allergens/AllergenBadgeRow.vue'
 
 const props = defineProps({
   recipe: { type: Object, required: true },
