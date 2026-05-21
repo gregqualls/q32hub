@@ -2,14 +2,17 @@
 
 namespace App\Services;
 
+use App\Exceptions\AllergenAcknowledgementRequired;
 use App\Models\Family;
 use App\Models\MealPlan;
 use App\Models\MealPlanEntry;
+use App\Models\Recipe;
 use App\Models\ShoppingList;
 use App\Models\Task;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 
 class MealPlanService
 {
@@ -49,9 +52,23 @@ class MealPlanService
 
     /**
      * Add an entry to a meal plan. Triggers shopping list and task cascades.
+     *
+     * Refuses with AllergenAcknowledgementRequired if the recipe carries any
+     * allergen for any family member with a reviewed profile, unless the
+     * caller has explicitly set `acknowledge_allergens => true`.
      */
     public function addEntry(MealPlan $plan, array $data, User $user): MealPlanEntry
     {
+        if (! empty($data['recipe_id']) && empty($data['acknowledge_allergens'])) {
+            $recipe = Recipe::with('allergens')->find($data['recipe_id']);
+            if ($recipe) {
+                $hits = $this->allergenHitsForFamily($plan->family_id, $recipe);
+                if (! empty($hits)) {
+                    throw new AllergenAcknowledgementRequired($hits);
+                }
+            }
+        }
+
         $entry = MealPlanEntry::create([
             'meal_plan_id' => $plan->id,
             'recipe_id' => $data['recipe_id'] ?? null,
@@ -247,6 +264,51 @@ class MealPlanService
             ->pluck('name')
             ->map(fn ($name) => strtolower(trim($name)))
             ->all();
+    }
+
+    /**
+     * Detect (member, allergen) hits between a recipe and the reviewed allergy
+     * profiles of the recipe's family. Members without a reviewed profile are
+     * never returned — silently filtering against an unknown profile would be
+     * worse than warning the user explicitly.
+     *
+     * @return array<int, array{member_id: string, member_name: string, allergen_id: string, allergen_name: string, presence: string}>
+     */
+    public function allergenHitsForFamily(string $familyId, Recipe $recipe): array
+    {
+        $recipe->loadMissing('allergens');
+
+        if ($recipe->allergens->isEmpty()) {
+            return [];
+        }
+
+        $recipeAllergenIds = $recipe->allergens->pluck('id');
+
+        $rows = DB::table('member_allergens')
+            ->join('users', 'users.id', '=', 'member_allergens.user_id')
+            ->join('allergens', 'allergens.id', '=', 'member_allergens.allergen_id')
+            ->where('users.family_id', $familyId)
+            ->whereNotNull('users.allergen_profile_reviewed_at')
+            ->whereIn('member_allergens.allergen_id', $recipeAllergenIds)
+            ->get([
+                'users.id as member_id',
+                'users.name as member_name',
+                'allergens.id as allergen_id',
+                'allergens.name as allergen_name',
+            ]);
+
+        $presenceByAllergen = $recipe->allergens
+            ->mapWithKeys(fn ($a) => [
+                $a->id => $a->getRelationValue('pivot')->presence->value,
+            ]);
+
+        return $rows->map(fn ($row) => [
+            'member_id' => (string) $row->member_id,
+            'member_name' => $row->member_name,
+            'allergen_id' => (string) $row->allergen_id,
+            'allergen_name' => $row->allergen_name,
+            'presence' => $presenceByAllergen[$row->allergen_id] ?? 'contains',
+        ])->all();
     }
 
     /**

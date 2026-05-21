@@ -40,6 +40,9 @@
           Favorites
         </KinChip>
 
+        <!-- Safe-for-member filter (food module) -->
+        <SafeForMemberFilter v-if="foodEnabled" v-model="safeForMemberIds" />
+
         <!-- Divider -->
         <div class="w-px h-4 bg-border-subtle flex-shrink-0"></div>
 
@@ -234,6 +237,8 @@ import KinSelect from '@/components/design-system/KinSelect.vue'
 import KinChip from '@/components/design-system/KinChip.vue'
 import KinEmptyState from '@/components/design-system/KinEmptyState.vue'
 import KinModalSheet from '@/components/design-system/KinModalSheet.vue'
+import SafeForMemberFilter from '@/components/allergens/SafeForMemberFilter.vue'
+import { useAuthStore } from '@/stores/auth'
 import {
   HeartIcon,
   PencilSquareIcon,
@@ -248,8 +253,11 @@ import {
 import { HeartIcon as HeartIconSolid } from '@heroicons/vue/24/solid'
 
 const recipesStore = useRecipesStore()
-const { recipes, tags, isLoading, hasMore, searchQuery, sortBy, selectedTagIds, showFavoritesOnly } = storeToRefs(recipesStore)
+const authStore = useAuthStore()
+const { recipes, tags, isLoading, hasMore, searchQuery, sortBy, selectedTagIds, showFavoritesOnly, safeForMemberIds } = storeToRefs(recipesStore)
 const { success, error: notifyError } = useNotification()
+
+const foodEnabled = computed(() => authStore.userCanAccessModule('food'))
 
 const searchInput = ref('')
 const showAddMenu = ref(false)
@@ -355,6 +363,11 @@ const loadMore = () => {
 
 // Tag filter triggers refetch
 watch(selectedTagIds, () => {
+  recipesStore.fetchRecipes()
+}, { deep: true })
+
+// Safe-for-members filter triggers refetch
+watch(safeForMemberIds, () => {
   recipesStore.fetchRecipes()
 }, { deep: true })
 

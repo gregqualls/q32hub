@@ -161,8 +161,19 @@ export const useMealsStore = defineStore('meals', () => {
       if (idx !== -1) currentPlan.value.entries.splice(idx, 1, newEntry)
       return { success: true, data: newEntry }
     } catch (err) {
-      // Rollback
+      // Rollback optimistic add
       currentPlan.value.entries = currentPlan.value.entries.filter(e => e.id !== tempEntry.id)
+
+      // Allergen acknowledgement required — surface so caller can prompt user.
+      if (err.response?.status === 409 && err.response?.data?.requires_acknowledgement) {
+        return {
+          success: false,
+          requiresAllergenAck: true,
+          hits: err.response.data.hits || [],
+          retry: (acknowledged) => addEntry(planId, { ...data, acknowledge_allergens: !!acknowledged }),
+        }
+      }
+
       return { success: false, error: err.response?.data?.message || 'Failed to add entry' }
     }
   }
