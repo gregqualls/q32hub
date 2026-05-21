@@ -2,6 +2,16 @@
 
 > Updated at the end of every working session. Newest entries first.
 
+## 2026-05-21 — Kudo stacking hardening: TOCTOU fix + notification suppression ([#309](https://github.com/gregqualls/kinhold/issues/309), [#310](https://github.com/gregqualls/kinhold/issues/310))
+
+Two follow-up fixes for the kudo stacking feature shipped in PR #308.
+
+**TOCTOU race (#309):** Concurrent stack requests could both pass the application-level duplicate check before either insert completed, creating two stack rows for the same user on the same kudo. Fixed with a DB-level unique constraint on `(stacked_from_transaction_id, awarded_by)`. The REST controller and MCP tool both catch `UniqueConstraintViolationException` and return the same friendly "You've already +1'd this kudo." message. The existing app-level check is retained as a cheap early-return for the serial case.
+
+**Notification spam (#310):** Each stack fired a fresh `KudosReceivedNotification` to the recipient, identical to the original kudo notification. A kudo recipient with 10 stacks would receive 11 notifications. Fixed by suppressing the notification when the transaction is a stack (i.e., `stacked_from_transaction_id` is set); the original kudo path is unchanged.
+
+Tests: 3 new tests in `KudosStackingTest` — one for the DB constraint race simulation, one confirming stacks produce no notification, and one regression-guarding that original kudos still notify.
+
 ## 2026-05-14 — Stack onto someone else's kudo ([#125](https://github.com/gregqualls/kinhold/issues/125))
 
 Members can now "+1" onto an existing kudo from the points feed instead of having to type their own. Each "+1" is a real Kudos transaction (still +1 point to the recipient), but it's linked to the source kudo via a new `stacked_from_transaction_id` column. The feed surfaces the stack count next to the original and a "+1'd" badge once you've stacked it yourself.
