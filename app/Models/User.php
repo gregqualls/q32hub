@@ -19,6 +19,7 @@ use NotificationChannels\WebPush\HasPushSubscriptions;
  * @property array<string, mixed>|null $dashboard_config
  * @property array<string, mixed>|null $email_preferences
  * @property array<string, mixed>|null $notification_preferences
+ * @property Carbon|null $allergen_profile_reviewed_at
  */
 class User extends Authenticatable implements MustVerifyEmail
 {
@@ -47,6 +48,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'notification_preferences',
         'easter_eggs_found',
         'onboarding_completed_at',
+        'allergen_profile_reviewed_at',
     ];
 
     /**
@@ -90,7 +92,13 @@ class User extends Authenticatable implements MustVerifyEmail
             'easter_eggs_found' => 'array',
             'dashboard_config' => 'json',
             'onboarding_completed_at' => 'datetime',
+            'allergen_profile_reviewed_at' => 'datetime',
         ];
+    }
+
+    public function allergens(): BelongsToMany
+    {
+        return $this->belongsToMany(Allergen::class, 'member_allergens')->using(MemberAllergen::class)->withTimestamps();
     }
 
     /**

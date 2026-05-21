@@ -1,5 +1,8 @@
 <template>
   <div class="p-4 md:p-6 max-w-6xl">
+    <!-- Allergy profile review prompt (food module only, hidden when reviewed) -->
+    <AllergyProfileReviewBanner class="mb-4" />
+
     <!-- Edit mode toolbar -->
     <DashboardToolbar
       v-if="dashboardStore.editMode"
@@ -84,6 +87,7 @@ import WidgetPickerModal from '@/components/dashboard/WidgetPickerModal.vue'
 import KinButton from '@/components/design-system/KinButton.vue'
 import KinSkeleton from '@/components/design-system/KinSkeleton.vue'
 import KinEmptyState from '@/components/design-system/KinEmptyState.vue'
+import AllergyProfileReviewBanner from '@/components/allergens/AllergyProfileReviewBanner.vue'
 import { useNotification } from '@/composables/useNotification'
 import { PencilSquareIcon, PlusIcon, Squares2X2Icon } from '@heroicons/vue/24/outline'
 
