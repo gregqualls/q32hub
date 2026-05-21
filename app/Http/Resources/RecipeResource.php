@@ -25,6 +25,11 @@ class RecipeResource extends JsonResource
             'source_url' => $this->source_url,
             'source_type' => $this->source_type,
             'image_path' => $this->image_path,
+            'share' => [
+                'is_shared' => $recipe->isShared(),
+                'url' => $recipe->shareUrl(),
+                'visible_attribution' => (bool) $recipe->share_visible_attribution,
+            ],
             'images' => $this->whenLoaded('images', fn () => $recipe->images->map(fn ($img) => [
                 'id' => $img->id,
                 'path' => $img->path,

@@ -32,6 +32,8 @@ class Recipe extends Model
         'notes',
         'is_favorite',
         'sort_order',
+        'share_token',
+        'share_visible_attribution',
     ];
 
     protected $casts = [
@@ -43,7 +45,18 @@ class Recipe extends Model
         'cook_time_minutes' => 'integer',
         'total_time_minutes' => 'integer',
         'sort_order' => 'integer',
+        'share_visible_attribution' => 'boolean',
     ];
+
+    public function isShared(): bool
+    {
+        return ! empty($this->share_token);
+    }
+
+    public function shareUrl(): ?string
+    {
+        return $this->isShared() ? url('/r/'.$this->share_token) : null;
+    }
 
     public function family(): BelongsTo
     {
