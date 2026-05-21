@@ -68,9 +68,22 @@
       </div>
 
       <!-- Hero image -->
-      <div v-if="recipe.image_path" class="px-4 md:px-6 mb-4">
+      <div v-if="heroImagePath" class="px-4 md:px-6 mb-4">
         <div class="aspect-video rounded-xl overflow-hidden bg-surface-sunken">
-          <img :src="`/storage/${recipe.image_path}`" :alt="recipe.title" class="w-full h-full object-cover" />
+          <img :src="resolveStoragePath(heroImagePath)" :alt="recipe.title" class="w-full h-full object-cover" />
+        </div>
+        <!-- Small gallery row of additional images -->
+        <div v-if="extraImages.length > 0" class="mt-2 flex gap-2 overflow-x-auto pb-1">
+          <button
+            v-for="img in extraImages"
+            :key="img.id || img.path"
+            type="button"
+            class="shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-border-subtle bg-surface-sunken hover:border-accent-lavender-bold transition-colors"
+            :aria-label="`View image`"
+            @click="setHero(img.path)"
+          >
+            <img :src="resolveStoragePath(img.path)" alt="" class="w-full h-full object-cover" />
+          </button>
         </div>
       </div>
 
@@ -285,6 +298,36 @@ const showDeleteConfirm = ref(false)
 const showCookLogModal = ref(false)
 const cookLogs = ref([])
 const ratings = ref([])
+const heroOverride = ref(null)
+
+const allImages = computed(() => {
+  const list = recipe.value?.images || []
+  if (list.length > 0) return list
+  // Backwards compat: a recipe migrated from single image_path still works.
+  if (recipe.value?.image_path) {
+    return [{ id: null, path: recipe.value.image_path, is_primary: true }]
+  }
+  return []
+})
+
+const primaryImagePath = computed(() => {
+  const primary = allImages.value.find((i) => i.is_primary)
+  return primary?.path || allImages.value[0]?.path || null
+})
+
+const heroImagePath = computed(() => heroOverride.value || primaryImagePath.value)
+
+const extraImages = computed(() => allImages.value.filter((i) => i.path !== heroImagePath.value))
+
+const setHero = (path) => {
+  heroOverride.value = path
+}
+
+const resolveStoragePath = (path) => {
+  if (!path) return null
+  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('/storage/')) return path
+  return `/storage/${path}`
+}
 
 const totalTime = computed(() => {
   if (!recipe.value) return null
