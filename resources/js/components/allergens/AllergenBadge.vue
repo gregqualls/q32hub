@@ -19,12 +19,12 @@ const props = defineProps({
 
 const isContains = computed(() => props.presence === 'contains')
 
-// Token-aligned: contains uses status-error tint, may_contain uses status-warning.
+// Token-aligned: contains uses status-failed tint, may_contain uses status-warning.
 // Unconfirmed dims via reduced opacity + dashed outline.
 const classes = computed(() => {
   const base = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border'
   const tone = isContains.value
-    ? 'bg-status-error/10 text-status-error border-status-error/30'
+    ? 'bg-status-failed/10 text-status-failed border-status-failed/30'
     : 'bg-status-warning/10 text-status-warning border-status-warning/40'
   const confirmation = props.unconfirmed
     ? 'border-dashed opacity-70'

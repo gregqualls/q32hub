@@ -120,7 +120,7 @@ const remove = async (allergen) => {
                 <PencilSquareIcon class="w-4 h-4" />
               </button>
               <button
-                class="p-1.5 text-status-error hover:bg-status-error/10 rounded"
+                class="p-1.5 text-status-failed hover:bg-status-failed/10 rounded"
                 aria-label="Delete"
                 @click="remove(a)"
               >
@@ -130,7 +130,7 @@ const remove = async (allergen) => {
           </template>
         </li>
       </ul>
-      <p v-if="editError" class="text-xs text-status-error mt-2" role="alert">{{ editError }}</p>
+      <p v-if="editError" class="text-xs text-status-failed mt-2" role="alert">{{ editError }}</p>
     </div>
 
     <div v-if="isParent" class="pt-2 border-t border-border-subtle">
@@ -146,7 +146,7 @@ const remove = async (allergen) => {
           Add
         </KinButton>
       </div>
-      <p v-if="addError" class="text-xs text-status-error mt-2" role="alert">{{ addError }}</p>
+      <p v-if="addError" class="text-xs text-status-failed mt-2" role="alert">{{ addError }}</p>
     </div>
   </div>
 </template>

@@ -30,6 +30,7 @@ class StoreMealPlanEntryRequest extends FormRequest
             'assigned_cooks.*' => ['uuid', Rule::exists('users', 'id')->where('family_id', $familyId)],
             'notes' => ['nullable', 'string', 'max:255'],
             'sort_order' => ['nullable', 'integer'],
+            'acknowledge_allergens' => ['nullable', 'boolean'],
         ];
     }
 

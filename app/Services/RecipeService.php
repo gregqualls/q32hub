@@ -10,6 +10,7 @@ use App\Models\Recipe;
 use App\Models\RecipeCookLog;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -142,6 +143,17 @@ class RecipeService
             $query->favorites();
         }
 
+        // Allergen filtering: exclude recipes carrying any allergen for the given
+        // reviewed-profile members. `safe_for=all` resolves to every family member
+        // with a reviewed profile (skipping unreviewed to avoid false-safe filtering).
+        $unsafeAllergenIds = $this->unsafeAllergenIdsForFilter($family, $filters);
+        if ($unsafeAllergenIds !== null && $unsafeAllergenIds->isNotEmpty()) {
+            $query->whereDoesntHave(
+                'allergens',
+                fn ($q) => $q->whereIn('allergens.id', $unsafeAllergenIds)
+            );
+        }
+
         $sort = $filters['sort'] ?? 'recent';
         match ($sort) {
             'alpha' => $query->orderBy('title'),
@@ -157,6 +169,44 @@ class RecipeService
         $perPage = min((int) ($filters['per_page'] ?? 20), 100);
 
         return $query->with(['ingredients', 'tags', 'allergens', 'creator', 'ratings'])->paginate($perPage);
+    }
+
+    /**
+     * Resolve the set of allergen IDs that should disqualify a recipe given the
+     * `safe_for_members` filter. Returns null when no filtering is requested,
+     * or a (possibly empty) collection of allergen IDs otherwise.
+     *
+     * Members without a reviewed allergy profile are skipped, so a recipe is
+     * never silently considered "safe for someone we never asked about."
+     */
+    private function unsafeAllergenIdsForFilter(Family $family, array $filters): ?Collection
+    {
+        $memberIds = null;
+
+        if (($filters['safe_for'] ?? null) === 'all') {
+            $memberIds = User::where('family_id', $family->id)
+                ->whereNotNull('allergen_profile_reviewed_at')
+                ->pluck('id');
+        } elseif (! empty($filters['safe_for_members'])) {
+            $memberIds = User::where('family_id', $family->id)
+                ->whereIn('id', (array) $filters['safe_for_members'])
+                ->whereNotNull('allergen_profile_reviewed_at')
+                ->pluck('id');
+        }
+
+        if ($memberIds === null) {
+            return null;
+        }
+
+        if ($memberIds->isEmpty()) {
+            return collect();
+        }
+
+        return DB::table('member_allergens')
+            ->whereIn('user_id', $memberIds)
+            ->pluck('allergen_id')
+            ->unique()
+            ->values();
     }
 
     /**

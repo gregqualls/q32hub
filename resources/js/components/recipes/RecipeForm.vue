@@ -479,11 +479,11 @@ const cycleAllergen = (id) => {
 }
 
 const allergenChipClass = (id) => {
-  const base = 'px-3 py-1.5 text-xs font-medium rounded-full border transition-colors'
+  const base = 'px-3 py-1.5 text-xs font-semibold rounded-full border-2 transition-colors'
   const state = allergenState(id)
-  if (state === 'contains') return `${base} bg-status-error/10 text-status-error border-status-error/40`
-  if (state === 'may_contain') return `${base} bg-status-warning/10 text-status-warning border-status-warning/40 border-dashed`
-  return `${base} bg-surface-sunken text-ink-secondary border-transparent hover:bg-surface-overlay`
+  if (state === 'contains') return `${base} bg-status-failed text-white border-status-failed`
+  if (state === 'may_contain') return `${base} bg-status-warning/15 text-status-warning border-status-warning border-dashed`
+  return `${base} bg-surface-sunken text-ink-secondary border-transparent font-medium hover:bg-surface-overlay`
 }
 
 const allergenChipLabel = (allergen) => {

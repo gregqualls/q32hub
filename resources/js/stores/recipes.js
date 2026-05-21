@@ -16,6 +16,7 @@ export const useRecipesStore = defineStore('recipes', () => {
   const sortBy = ref('recent')
   const selectedTagIds = ref([])
   const showFavoritesOnly = ref(false)
+  const safeForMemberIds = ref([])
 
   // Computed
   const hasMore = computed(() => pagination.value.current_page < pagination.value.last_page)
@@ -57,6 +58,7 @@ export const useRecipesStore = defineStore('recipes', () => {
       if (sortBy.value && sortBy.value !== 'recent') params.sort = sortBy.value
       if (selectedTagIds.value.length === 1) params.tag = selectedTagIds.value[0]
       if (showFavoritesOnly.value) params.favorite = 1
+      if (safeForMemberIds.value.length > 0) params['safe_for_members'] = safeForMemberIds.value
 
       const response = await api.get('/recipes', { params })
       recipes.value = response.data.data
@@ -285,6 +287,7 @@ export const useRecipesStore = defineStore('recipes', () => {
     sortBy,
     selectedTagIds,
     showFavoritesOnly,
+    safeForMemberIds,
 
     // Computed
     hasMore,

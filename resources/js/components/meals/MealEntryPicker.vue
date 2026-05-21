@@ -192,6 +192,14 @@
       <p v-if="submitError" class="text-xs text-status-failed mt-2">{{ submitError }}</p>
     </template>
   </SlidePanel>
+
+  <MealPlannerAllergenWarning
+    :show="showAllergenWarning"
+    :hits="allergenHits"
+    :recipe-title="allergenRecipeTitle"
+    @acknowledge="onAllergenAcknowledge"
+    @cancel="onAllergenCancel"
+  />
 </template>
 
 <script setup>
@@ -213,6 +221,7 @@ import BaseInput from '@/components/common/BaseInput.vue'
 import BaseButton from '@/components/common/BaseButton.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'
+import MealPlannerAllergenWarning from '@/components/allergens/MealPlannerAllergenWarning.vue'
 import IconRenderer from '@/components/common/IconRenderer.vue'
 
 const props = defineProps({
@@ -227,6 +236,13 @@ const recipesStore = useRecipesStore()
 const restaurantsStore = useRestaurantsStore()
 const mealsStore = useMealsStore()
 const authStore = useAuthStore()
+
+// Allergen-warning modal state. Declared here so submit() (defined below) has
+// stable references at evaluation time.
+const showAllergenWarning = ref(false)
+const allergenHits = ref([])
+const allergenRetry = ref(null)
+const allergenRecipeTitle = ref('')
 
 const familyMembers = computed(() => authStore.familyMembers || [])
 
@@ -343,8 +359,33 @@ const submit = async () => {
   if (result.success) {
     emit('added')
     emit('close')
+  } else if (result.requiresAllergenAck) {
+    allergenHits.value = result.hits
+    allergenRetry.value = result.retry
+    allergenRecipeTitle.value = activeSource.value === 'recipe' ? (selectedSource.value?.title || '') : ''
+    showAllergenWarning.value = true
   } else {
     submitError.value = result.error || 'Failed to add entry'
   }
+}
+
+const onAllergenAcknowledge = async () => {
+  showAllergenWarning.value = false
+  if (!allergenRetry.value) return
+  isSaving.value = true
+  const result = await allergenRetry.value(true)
+  isSaving.value = false
+  if (result.success) {
+    emit('added')
+    emit('close')
+  } else {
+    submitError.value = result.error || 'Failed to add entry'
+  }
+}
+
+const onAllergenCancel = () => {
+  showAllergenWarning.value = false
+  allergenHits.value = []
+  allergenRetry.value = null
 }
 </script>

@@ -77,7 +77,7 @@ const markNoAllergies = async () => {
       :disabled="!canEdit"
     />
 
-    <p v-if="lastError" class="text-xs text-status-error" role="alert">
+    <p v-if="lastError" class="text-xs text-status-failed" role="alert">
       {{ lastError }}
     </p>
 

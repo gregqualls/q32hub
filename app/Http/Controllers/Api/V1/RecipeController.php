@@ -30,7 +30,7 @@ class RecipeController extends Controller
     {
         $family = $request->user()->family;
 
-        $filters = $request->only(['search', 'tag', 'favorite', 'sort', 'per_page']);
+        $filters = $request->only(['search', 'tag', 'favorite', 'sort', 'per_page', 'safe_for', 'safe_for_members']);
 
         $recipes = $this->recipeService->searchRecipes($family, $filters);
 
