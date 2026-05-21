@@ -967,6 +967,33 @@
           </BaseButton>
         </SettingsSection>
 
+        <!-- Section 5b: Allergens (food module only) -->
+        <SettingsSection
+          v-if="foodModuleEnabled"
+          id="allergens"
+          title="Allergens"
+          description="Family allergens and per-member allergy profiles"
+          :icon="ShieldExclamationIcon"
+          :model-value="expandedSections.has('allergens')"
+          @update:model-value="val => toggleSection('allergens', val)"
+        >
+          <div class="space-y-8">
+            <FamilyAllergenSettings />
+
+            <div class="space-y-6 pt-2 border-t border-border-subtle">
+              <div>
+                <h3 class="text-base font-semibold text-ink-primary">Member profiles</h3>
+                <p class="text-xs text-ink-secondary mt-1">
+                  Tag each family member's allergies so the meal planner can warn you when a recipe is unsafe.
+                </p>
+              </div>
+              <div v-for="member in familyMembers" :key="member.id" class="p-4 bg-surface-sunken rounded-lg">
+                <AllergyProfileEditor :user="member" :can-edit="true" />
+              </div>
+            </div>
+          </div>
+        </SettingsSection>
+
         <!-- Section 6: Appearance -->
         <SettingsSection
           id="appearance"
@@ -1206,6 +1233,15 @@
     <!-- CHILD VIEW — Flat cards (unchanged)          -->
     <!-- ============================================ -->
     <template v-if="!isParent">
+      <!-- My Allergies (food module only) -->
+      <div v-if="foodModuleEnabled" id="allergens" class="card-lg mb-6">
+        <div class="flex items-center gap-2 mb-4">
+          <ShieldExclamationIcon class="w-5 h-5 text-accent-lavender-bold" />
+          <h2 class="text-lg font-semibold font-heading text-ink-primary">My Allergies</h2>
+        </div>
+        <AllergyProfileEditor :user="currentUser" :can-edit="true" />
+      </div>
+
       <!-- Appearance -->
       <div class="card-lg mb-6">
         <h2 class="text-lg font-semibold font-heading text-ink-primary mb-4">Appearance</h2>
@@ -1594,6 +1630,8 @@ import KinInput from '@/components/design-system/KinInput.vue'
 import KinSelect from '@/components/design-system/KinSelect.vue'
 import KinSwitch from '@/components/design-system/KinSwitch.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
+import FamilyAllergenSettings from '@/components/allergens/FamilyAllergenSettings.vue'
+import AllergyProfileEditor from '@/components/allergens/AllergyProfileEditor.vue'
 import {
   PlusIcon,
   TrashIcon,
@@ -1609,6 +1647,7 @@ import {
   CloudIcon,
   CakeIcon,
   ShieldCheckIcon,
+  ShieldExclamationIcon,
   SwatchIcon,
   BellIcon,
   CreditCardIcon,
@@ -1648,6 +1687,7 @@ const memberRoleOptions = [
 ]
 
 // ---- Version & Update Check ----
+const foodModuleEnabled = computed(() => authStore.userCanAccessModule('food'))
 const appVersion = computed(() => appConfig.value?.version ?? '—')
 const updateAvailable = computed(() => appConfig.value?.update_available ?? null)
 const updateDismissed = ref(false)

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\AllergenController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BadgesController;
 use App\Http\Controllers\Api\V1\BillingController;
@@ -22,6 +23,7 @@ use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\ShoppingListController;
 use App\Http\Controllers\Api\V1\TagController;
 use App\Http\Controllers\Api\V1\TaskController;
+use App\Http\Controllers\Api\V1\UserAllergenController;
 use App\Http\Controllers\Api\V1\VaultController;
 use App\Models\Family;
 use App\Models\User;
@@ -228,6 +230,21 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{recipe}/cook-logs', [RecipeController::class, 'addCookLog']);
                 Route::post('/{recipe}/rate', [RecipeController::class, 'rate']);
                 Route::get('/{recipe}/ratings', [RecipeController::class, 'ratings']);
+            });
+
+            // Allergens (module: food)
+            Route::prefix('/allergens')->middleware('module:food')->group(function () {
+                Route::get('/', [AllergenController::class, 'index']);
+                Route::post('/', [AllergenController::class, 'store']);
+                Route::patch('/{allergen}', [AllergenController::class, 'update']);
+                Route::delete('/{allergen}', [AllergenController::class, 'destroy']);
+            });
+
+            // Member allergy profiles (module: food)
+            Route::prefix('/users/{user}/allergens')->middleware('module:food')->group(function () {
+                Route::get('/', [UserAllergenController::class, 'index']);
+                Route::put('/', [UserAllergenController::class, 'update']);
+                Route::post('/mark-reviewed', [UserAllergenController::class, 'markReviewed']);
             });
 
             // Shopping (module: food)
