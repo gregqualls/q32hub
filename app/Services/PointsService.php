@@ -87,8 +87,8 @@ class PointsService
             'stacked_from_transaction_id' => $stackOnto?->id,
         ]);
 
-        // Notify the recipient (skip if giving to self).
-        if ($to->getKey() !== $from->getKey()) {
+        // Notify the recipient (skip if giving to self, or if this is a stack).
+        if ($to->getKey() !== $from->getKey() && $stackOnto === null) {
             $to->notify(new KudosReceivedNotification($from, $reason, $transaction));
         }
 

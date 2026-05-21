@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\PointTransaction;
 use App\Services\BadgeService;
 use App\Services\PointsService;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -176,6 +177,8 @@ class PointsController extends Controller
 
         try {
             $stack = $this->pointsService->giveKudos($from, $to, $family, $transaction->description, $transaction);
+        } catch (UniqueConstraintViolationException) {
+            return response()->json(['message' => "You've already +1'd this kudo."], 422);
         } catch (\Exception $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }

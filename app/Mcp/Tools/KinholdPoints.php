@@ -17,6 +17,7 @@ use App\Services\AuctionService;
 use App\Services\BadgeService;
 use App\Services\PointsService;
 use Carbon\Carbon;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
@@ -247,6 +248,8 @@ class KinholdPoints extends Tool
 
         try {
             $stack = $pointsService->giveKudos($user, $target, $family, $source->description, $source);
+        } catch (UniqueConstraintViolationException) {
+            return Response::error("You've already +1'd this kudo.");
         } catch (\Exception $e) {
             return Response::error($e->getMessage());
         }

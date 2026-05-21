@@ -7,7 +7,9 @@ use App\Enums\PointTransactionType;
 use App\Models\Family;
 use App\Models\PointTransaction;
 use App\Models\User;
+use App\Notifications\KudosReceivedNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -154,6 +156,60 @@ class KudosStackingTest extends TestCase
 
         $this->assertEquals(1, $originalInFeed['stacks_count']);
         $this->assertTrue($originalInFeed['stacked_by_me']);
+    }
+
+    public function test_db_constraint_prevents_duplicate_stack_bypassing_app_check(): void
+    {
+        $original = $this->createKudos(from: $this->alice, to: $this->bob, reason: 'Made the team laugh');
+
+        // Simulate the race: insert a stack row directly, bypassing the controller check.
+        PointTransaction::create([
+            'family_id' => $this->family->id,
+            'user_id' => $this->bob->id,
+            'type' => PointTransactionType::Kudos,
+            'points' => 1,
+            'description' => $original->description,
+            'awarded_by' => $this->carol->id,
+            'stacked_from_transaction_id' => $original->id,
+        ]);
+
+        Sanctum::actingAs($this->carol);
+        $this->postJson("/api/v1/points/kudos/{$original->id}/stack")
+            ->assertStatus(422)
+            ->assertJson(['message' => "You've already +1'd this kudo."]);
+    }
+
+    public function test_stacking_does_not_notify_the_recipient(): void
+    {
+        Notification::fake();
+        $original = $this->createKudos(from: $this->alice, to: $this->bob, reason: 'Made the team laugh');
+
+        Sanctum::actingAs($this->carol);
+        $this->postJson("/api/v1/points/kudos/{$original->id}/stack")->assertCreated();
+
+        Notification::assertNotSentTo($this->bob, KudosReceivedNotification::class);
+    }
+
+    public function test_original_kudo_still_notifies_the_recipient(): void
+    {
+        $this->bob->update([
+            'notification_preferences' => [
+                'email' => ['kudos_received' => true],
+                'push' => [],
+                'quiet_hours' => ['enabled' => false, 'start' => '22:00', 'end' => '07:00'],
+                'muted' => false,
+            ],
+        ]);
+
+        Notification::fake();
+
+        Sanctum::actingAs($this->alice);
+        $this->postJson('/api/v1/points/kudos', [
+            'user_id' => $this->bob->id,
+            'reason' => 'Made the team laugh',
+        ])->assertCreated();
+
+        Notification::assertSentTo($this->bob, KudosReceivedNotification::class);
     }
 
     private function makeUser(string $name, string $email, Family $family): User
