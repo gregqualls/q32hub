@@ -151,6 +151,9 @@ These features are live and working:
 | [#65](https://github.com/gregqualls/kinhold/issues/65) | Shopping & grocery lists | Very High | DONE |
 | [#66](https://github.com/gregqualls/kinhold/issues/66) | Meal planning | High | DONE |
 | [#67](https://github.com/gregqualls/kinhold/issues/67) | AI chatbot: meal and grocery integrations | Medium | DONE (`kinhold-food` action enum) |
+| [#311](https://github.com/gregqualls/kinhold/issues/311) | Sharable recipes (public Blade page, share token, opt-in family attribution) | High | DONE (v1.10.0) |
+| [#312](https://github.com/gregqualls/kinhold/issues/312) | Allergen tagging & filtering (Big 9 + custom, AI-assisted, false-safe filtering, meal-planner guard) | High | DONE (v1.10.0) |
+| [#323](https://github.com/gregqualls/kinhold/issues/323) | Multi-image recipes (carved out of #311) | Medium | DONE (v1.10.0) |
 | — | Settings: Food module toggle — note that URL import may use AI (token cost) | Low | Future |
 
 ---

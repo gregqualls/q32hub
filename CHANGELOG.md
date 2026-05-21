@@ -2,6 +2,30 @@
 
 > Updated at the end of every working session. Newest entries first.
 
+## 2026-05-21 — v1.10.0: Allergens, multi-image recipes, public sharing ([#311](https://github.com/gregqualls/kinhold/issues/311), [#312](https://github.com/gregqualls/kinhold/issues/312))
+
+Six PRs land together as v1.10.0. Two user-visible features: sharable recipes and a severe-stakes allergen system.
+
+**Allergen system ([#312](https://github.com/gregqualls/kinhold/issues/312)).** Big 9 allergens (peanuts, tree nuts, milk, eggs, wheat, soy, fish, shellfish, sesame) are seeded as global allergens; families can add custom ones. Recipes get tri-state tagging per allergen: contains, may-contain (cross-contact), or absent. Family members get a per-user allergen profile that must be explicitly reviewed before it influences filtering (`allergen_profile_reviewed_at`) — the "false-safe" invariant: an un-reviewed profile is treated as "no data," never as "no allergies."
+
+Filtering is invariant-driven: `/api/v1/recipes?safe_for_members[]={id}` returns only recipes where no listed allergen on the recipe overlaps the member's reviewed allergens. `may_contain` counts as unsafe (anaphylaxis-grade default). The meal planner enforces the same invariant: planning a recipe that hits any reviewed member's allergens returns 409 with `requires_acknowledgement: true` plus the list of hits; the parent can re-submit with `acknowledge_allergens: true` to override.
+
+AI-assisted tagging runs through the existing recipe import pipeline. Each allergen prediction lands as `ai_suggested` or `ai_auto` based on confidence; only `ai_auto` (≥0.95) or `human_confirmed` rows count toward filtering. A backfill job queues per-recipe with per-family rate limits (30/min/family on the worker, 2/day/family on dispatch) so importing a large recipe library can't bury the queue.
+
+Architecture decision: [DEC-013](docs/ARCHITECTURE.md) captures the severe-stakes design invariants (false-safe filtering, confidence routing, provenance tracking, mass-assignment hardening).
+
+**Public recipe sharing ([#311](https://github.com/gregqualls/kinhold/issues/311)).** Recipes can be made public via a 22-char base62 share token (~131 bits of entropy, no enumeration). Public URL `/r/{token}` is Blade-rendered server-side so OG tags and indexable HTML are present without booting the SPA. The page intentionally has `noindex,nofollow` — sharing is for the family group chat, not the open web. Optional `share_visible_attribution` reveals the family name in a footer card; off by default. The Vue side has a "Preview what your family will see" link and a share modal with a clipboard copy.
+
+**Multi-image recipes ([#323](https://github.com/gregqualls/kinhold/issues/323)).** Recipes now support multiple images with ordering, captions, and a primary-image marker. Carved out of #311 because cookbook-scan thumbnails would otherwise leak into shared recipes.
+
+**MCP coverage.** `KinholdFood` gains 13 new actions covering allergens (CRUD, profiles), recipe allergen tagging (add/patch/backfill), and recipe sharing (share/share-update/unshare). MCP clients can run the full new surface.
+
+**Public Blade page polish.** Hero image is full-bleed with a custom gradient overlay so the title sits inside the photo instead of beneath it. Ingredient quantities render as fractions ("2 1/4 cups" not "2.25"). Allergens render as Big 9 line-art SVG icons inline with the ingredients, not as emoji badges in the hero. Print stylesheet hides chrome and keeps the recipe legible on paper.
+
+**Security hardening (pre-merge /review pass).** `share_token`, `share_visible_attribution`, and `allergen_profile_reviewed_at` are not in `$fillable` — those fields require explicit `forceFill` calls from the service layer so a malicious payload can't bypass the false-safe filtering invariant. New `UserAllergenPolicy` gates reads (family-scoped) and writes (parent or self). The backfill job validates `family_id` and short-circuits on mismatch as defense-in-depth.
+
+Tests: 443/443 green. New coverage in `AllergenFilteringTest`, `AllergenAiIntegrationTest`, and `PublicRecipeSharingTest`.
+
 ## 2026-05-21 — Kudo stacking hardening: TOCTOU fix + notification suppression ([#309](https://github.com/gregqualls/kinhold/issues/309), [#310](https://github.com/gregqualls/kinhold/issues/310))
 
 Two follow-up fixes for the kudo stacking feature shipped in PR #308.
