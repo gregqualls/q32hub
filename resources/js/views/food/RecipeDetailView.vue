@@ -109,6 +109,12 @@
           </KinChip>
         </div>
 
+        <!-- Allergens -->
+        <AllergenBadgeRow
+          v-if="recipe.allergens?.length"
+          :allergens="recipe.allergens"
+        />
+
         <!-- Source -->
         <div v-if="recipe.source_url" class="flex items-center gap-1.5">
           <LinkIcon class="w-3.5 h-3.5 text-ink-tertiary" />
@@ -243,6 +249,7 @@ import StepList from '@/components/recipes/StepList.vue'
 import FamilyRating from '@/components/recipes/FamilyRating.vue'
 import CookLogEntry from '@/components/recipes/CookLogEntry.vue'
 import RecipeForm from '@/components/recipes/RecipeForm.vue'
+import AllergenBadgeRow from '@/components/allergens/AllergenBadgeRow.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'

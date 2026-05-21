@@ -54,7 +54,7 @@ class RecipeController extends Controller
     {
         $this->authorize('view', $recipe);
 
-        $recipe->load(['ingredients', 'cookLogs.user', 'ratings.user', 'tags', 'creator']);
+        $recipe->load(['ingredients', 'cookLogs.user', 'ratings.user', 'tags', 'allergens', 'creator']);
 
         return response()->json(['recipe' => new RecipeResource($recipe)]);
     }

@@ -77,6 +77,14 @@ class Recipe extends Model
             ->withTimestamps();
     }
 
+    public function allergens(): BelongsToMany
+    {
+        return $this->belongsToMany(Allergen::class, 'recipe_allergens')
+            ->using(RecipeAllergen::class)
+            ->withPivot(['id', 'presence', 'source', 'confidence', 'confirmed_by', 'confirmed_at'])
+            ->withTimestamps();
+    }
+
     public function scopeForFamily($query, string $familyId): void
     {
         $query->where('family_id', $familyId);

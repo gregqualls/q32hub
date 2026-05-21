@@ -2,12 +2,15 @@
 
 namespace App\Services;
 
+use App\Enums\AllergenSource;
+use App\Models\Allergen;
 use App\Models\Family;
 use App\Models\Rating;
 use App\Models\Recipe;
 use App\Models\RecipeCookLog;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class RecipeService
@@ -39,7 +42,11 @@ class RecipeService
             $recipe->tags()->sync($data['tag_ids']);
         }
 
-        return $recipe->load(['ingredients', 'tags', 'creator']);
+        if (array_key_exists('allergens', $data)) {
+            $this->syncAllergens($recipe, $user, $data['allergens'] ?? []);
+        }
+
+        return $recipe->load(['ingredients', 'tags', 'allergens', 'creator']);
     }
 
     public function updateRecipe(Recipe $recipe, array $data): Recipe
@@ -67,7 +74,12 @@ class RecipeService
             $recipe->tags()->sync($data['tag_ids']);
         }
 
-        return $recipe->load(['ingredients', 'tags', 'creator']);
+        if (array_key_exists('allergens', $data)) {
+            $editor = $recipe->creator()->first() ?? auth()->user();
+            $this->syncAllergens($recipe, $editor, $data['allergens'] ?? []);
+        }
+
+        return $recipe->load(['ingredients', 'tags', 'allergens', 'creator']);
     }
 
     public function deleteRecipe(Recipe $recipe): void
@@ -144,7 +156,60 @@ class RecipeService
 
         $perPage = min((int) ($filters['per_page'] ?? 20), 100);
 
-        return $query->with(['ingredients', 'tags', 'creator', 'ratings'])->paginate($perPage);
+        return $query->with(['ingredients', 'tags', 'allergens', 'creator', 'ratings'])->paginate($perPage);
+    }
+
+    /**
+     * Replace a recipe's allergen tags. All entries written by this method are
+     * `human_confirmed`. AI-driven writes go through the import service in PR 4.
+     *
+     * Allergens must be available to the recipe's family (global Big 9 or family
+     * customs). Unknown allergens are silently skipped (form validation should
+     * catch them earlier).
+     */
+    private function syncAllergens(Recipe $recipe, ?User $editor, array $allergens): void
+    {
+        $allowed = Allergen::availableToFamily($recipe->family_id)
+            ->whereIn('id', collect($allergens)->pluck('allergen_id')->filter()->all())
+            ->pluck('id')
+            ->flip();
+
+        $now = now();
+        $rows = [];
+        $seen = [];
+
+        foreach ($allergens as $entry) {
+            $allergenId = $entry['allergen_id'] ?? null;
+            $presence = $entry['presence'] ?? null;
+            if (! $allergenId || ! $presence || ! isset($allowed[$allergenId])) {
+                continue;
+            }
+            $dedupeKey = $allergenId.'|'.$presence;
+            if (isset($seen[$dedupeKey])) {
+                continue;
+            }
+            $seen[$dedupeKey] = true;
+
+            $rows[$dedupeKey] = [
+                'id' => Str::uuid()->toString(),
+                'recipe_id' => $recipe->id,
+                'allergen_id' => $allergenId,
+                'presence' => $presence,
+                'source' => AllergenSource::HumanConfirmed->value,
+                'confidence' => null,
+                'confirmed_by' => $editor?->id,
+                'confirmed_at' => $now,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        // Replace strategy: delete current rows, insert new. Future PRs (AI) will
+        // be smarter about preserving provenance on unchanged entries.
+        $recipe->allergens()->detach();
+        if ($rows) {
+            DB::table('recipe_allergens')->insert(array_values($rows));
+        }
     }
 
     private function insertIngredients(Recipe $recipe, array $ingredients): void

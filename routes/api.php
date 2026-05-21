@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\V1\OnboardingController;
 use App\Http\Controllers\Api\V1\PointRequestController;
 use App\Http\Controllers\Api\V1\PointsController;
 use App\Http\Controllers\Api\V1\PushSubscriptionController;
+use App\Http\Controllers\Api\V1\RecipeAllergenController;
 use App\Http\Controllers\Api\V1\RecipeController;
 use App\Http\Controllers\Api\V1\RestaurantController;
 use App\Http\Controllers\Api\V1\RewardsController;
@@ -230,6 +231,10 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{recipe}/cook-logs', [RecipeController::class, 'addCookLog']);
                 Route::post('/{recipe}/rate', [RecipeController::class, 'rate']);
                 Route::get('/{recipe}/ratings', [RecipeController::class, 'ratings']);
+
+                // Fine-grained allergen edits (single-row confirm / change presence / remove)
+                Route::post('/{recipe}/allergens', [RecipeAllergenController::class, 'store']);
+                Route::patch('/{recipe}/allergens/{allergen}', [RecipeAllergenController::class, 'update']);
             });
 
             // Allergens (module: food)
