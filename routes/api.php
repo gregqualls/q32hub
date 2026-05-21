@@ -235,6 +235,9 @@ Route::prefix('v1')->group(function () {
                 // Fine-grained allergen edits (single-row confirm / change presence / remove)
                 Route::post('/{recipe}/allergens', [RecipeAllergenController::class, 'store']);
                 Route::patch('/{recipe}/allergens/{allergen}', [RecipeAllergenController::class, 'update']);
+
+                // Family-wide AI allergen backfill (parent only)
+                Route::post('/allergens/backfill', [RecipeAllergenController::class, 'backfill']);
             });
 
             // Allergens (module: food)

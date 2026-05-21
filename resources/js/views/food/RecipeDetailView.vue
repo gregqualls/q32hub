@@ -113,6 +113,8 @@
         <AllergenBadgeRow
           v-if="recipe.allergens?.length"
           :allergens="recipe.allergens"
+          :editable="isParent"
+          @confirm="onConfirmAllergen"
         />
 
         <!-- Source -->
@@ -333,6 +335,11 @@ const loadRecipe = async () => {
 
 const handleToggleFavorite = async () => {
   const result = await recipesStore.toggleFavorite(recipe.value.id)
+  if (!result.success) notifyError(result.error)
+}
+
+const onConfirmAllergen = async (row) => {
+  const result = await recipesStore.confirmAllergen(recipe.value.id, row.pivot_id)
   if (!result.success) notifyError(result.error)
 }
 
