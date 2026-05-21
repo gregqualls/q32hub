@@ -42,8 +42,8 @@ const grouped = computed(() => {
   <KinModalSheet :model-value="show" @update:model-value="(v) => !v && emit('cancel')">
     <div class="space-y-4 p-1">
       <div class="flex items-start gap-3">
-        <div class="shrink-0 w-10 h-10 rounded-full bg-status-error/10 flex items-center justify-center">
-          <ShieldExclamationIcon class="w-5 h-5 text-status-error" />
+        <div class="shrink-0 w-10 h-10 rounded-full bg-status-failed/10 flex items-center justify-center">
+          <ShieldExclamationIcon class="w-5 h-5 text-status-failed" />
         </div>
         <div class="flex-1 min-w-0">
           <h2 class="text-base font-semibold text-ink-primary">Allergen warning</h2>
@@ -59,13 +59,13 @@ const grouped = computed(() => {
         <li
           v-for="entry in grouped"
           :key="entry.member_id"
-          class="p-3 rounded-lg bg-status-error/5 border border-status-error/20"
+          class="p-3 rounded-lg bg-status-failed/5 border border-status-failed/20"
         >
           <p class="text-sm font-semibold text-ink-primary">{{ entry.member_name }}</p>
           <p class="text-xs text-ink-secondary mt-0.5">
             <template v-for="(item, idx) in entry.items" :key="`${entry.member_id}-${item.allergen_name}-${item.presence}`">
               <span v-if="idx > 0">, </span>
-              <span :class="item.presence === 'may_contain' ? 'text-status-warning' : 'text-status-error font-medium'">
+              <span :class="item.presence === 'may_contain' ? 'text-status-warning' : 'text-status-failed font-medium'">
                 {{ item.presence === 'may_contain' ? 'may contain ' : '' }}{{ item.allergen_name.toLowerCase() }}
               </span>
             </template>
