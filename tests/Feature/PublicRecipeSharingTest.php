@@ -31,6 +31,10 @@ class PublicRecipeSharingTest extends TestCase
     {
         parent::setUp();
 
+        // The public recipe Blade view uses @vite(); CI doesn't compile
+        // assets, so disable Vite resolution for these tests.
+        $this->withoutVite();
+
         $this->family = Family::create([
             'name' => 'The Ellis Family',
             'slug' => 'ellis',

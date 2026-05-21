@@ -105,12 +105,21 @@ HTML;
 
     // ── URL Import — JSON-LD path ──
 
-    public function test_url_import_with_json_ld_extracts_recipe_without_calling_llm(): void
+    public function test_url_import_with_json_ld_extracts_recipe_without_calling_recipe_llm(): void
     {
         Sanctum::actingAs($this->parent);
 
+        // Anthropic is stubbed to a benign empty-allergens payload. The JSON-LD
+        // path still parses the recipe locally; the allergen pass is the only
+        // legitimate Anthropic call. If recipe extraction silently regressed to
+        // an LLM call, the stub's empty payload would not contain title/servings
+        // and the assertions below would fail.
         Http::fake([
             'example.com/*' => Http::response($this->jsonLdHtml, 200),
+            'api.anthropic.com/*' => Http::response([
+                'content' => [['type' => 'text', 'text' => json_encode(['allergens' => []])]],
+                'usage' => ['input_tokens' => 0, 'output_tokens' => 0],
+            ], 200),
         ]);
 
         $response = $this->postJson('/api/v1/recipes/import/url?preview=1', [
@@ -124,8 +133,9 @@ HTML;
         $response->assertJsonPath('cook_time', 30);
         $response->assertJsonStructure(['ingredients', 'instructions']);
 
-        // Anthropic API should NOT have been called
-        Http::assertNotSent(fn ($r) => str_contains($r->url(), 'api.anthropic.com'));
+        // At most one Anthropic call (the allergen pass). Recipe extraction must
+        // not depend on the LLM for JSON-LD inputs.
+        Http::assertSentCount(2); // 1 to example.com for HTML, 1 to anthropic for allergens
     }
 
     // ── URL Import — LLM fallback path ──
