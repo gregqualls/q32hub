@@ -245,9 +245,23 @@ class AllergenAiIntegrationTest extends TestCase
         $service->shouldNotReceive('extractAllergensFromIngredients');
         $service->shouldNotReceive('persistAiAllergens');
 
-        (new BackfillJob($recipe->id))->handle($service);
+        (new BackfillJob($recipe->id, (string) $this->family->id))->handle($service);
 
         $this->assertEquals(1, RecipeAllergen::where('recipe_id', $recipe->id)->count());
+    }
+
+    public function test_backfill_job_short_circuits_on_family_id_mismatch(): void
+    {
+        $recipe = $this->makeRecipe('PB&J', withIngredients: true);
+
+        $service = Mockery::mock(RecipeImportService::class);
+        $service->shouldNotReceive('extractAllergensFromIngredients');
+        $service->shouldNotReceive('persistAiAllergens');
+
+        // Pass a deliberately wrong familyId to simulate a misconfigured dispatcher.
+        (new BackfillJob($recipe->id, 'a1b69789-0000-0000-0000-000000000000'))->handle($service);
+
+        $this->assertEquals(0, RecipeAllergen::where('recipe_id', $recipe->id)->count());
     }
 
     public function test_backfill_job_skips_recipes_with_no_ingredients(): void
@@ -257,7 +271,7 @@ class AllergenAiIntegrationTest extends TestCase
         $service = Mockery::mock(RecipeImportService::class);
         $service->shouldNotReceive('extractAllergensFromIngredients');
 
-        (new BackfillJob($recipe->id))->handle($service);
+        (new BackfillJob($recipe->id, (string) $this->family->id))->handle($service);
 
         $this->assertEquals(0, RecipeAllergen::where('recipe_id', $recipe->id)->count());
     }
@@ -280,7 +294,7 @@ class AllergenAiIntegrationTest extends TestCase
                 return 1;
             });
 
-        (new BackfillJob($recipe->id))->handle($service);
+        (new BackfillJob($recipe->id, (string) $this->family->id))->handle($service);
     }
 
     private function makeRecipe(string $title, bool $withIngredients = false): Recipe

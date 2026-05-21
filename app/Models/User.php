@@ -48,7 +48,10 @@ class User extends Authenticatable implements MustVerifyEmail
         'notification_preferences',
         'easter_eggs_found',
         'onboarding_completed_at',
-        'allergen_profile_reviewed_at',
+        // `allergen_profile_reviewed_at` is intentionally NOT fillable. The
+        // UserAllergenController uses forceFill so a member can never silently
+        // mark their profile reviewed (which would defeat the false-safe
+        // allergen filter).
     ];
 
     /**

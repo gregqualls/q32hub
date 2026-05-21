@@ -87,7 +87,7 @@
 - 10 preset badges seeded per family + parents can create more
 - BadgeService checks thresholds after every point/task event
 
-### 9. Food & Meal Planning (IMPLEMENTED — All 8 Steps Complete)
+### 9. Food & Meal Planning (IMPLEMENTED — All 8 Steps Complete + v1.10.0)
 - Recipe backend + module gating (Step 1, Issue #148)
 - Recipe import service: URL scraping + photo AI (Step 2, Issue #149)
 - Recipe frontend UI (Step 3, PR #158)
@@ -96,7 +96,28 @@
 - Meal plan backend live pipeline (Step 6, PR #165)
 - Meal plan frontend: weekly calendar, restaurants tab, settings (Step 7, Session 35)
 - **Step 8 (April 2026):** MCP tools for food/meals delivered via `kinhold-food` (47 actions across recipes, shopping, meal plans, presets, restaurants). Closes Issue #155 + #67.
-- See `docs/FOOD-FEATURES-SPEC.md` and `docs/FOOD-IMPLEMENTATION-PLAN.md`
+- **v1.10.0 (May 2026):** Six-PR allergen + sharing release. See module 10 below.
+- See `docs/FOOD-FEATURES-SPEC.md`, `docs/FOOD-IMPLEMENTATION-PLAN.md`, and `docs/ALLERGENS-IMPLEMENTATION-PLAN.md`
+
+### 10. Allergens, Multi-image, & Public Sharing (IMPLEMENTED — v1.10.0)
+Severe-stakes (anaphylaxis-grade) allergen system layered on top of the Food module. Six sub-PRs:
+
+- **Allergen reference data:** Big 9 (milk, eggs, fish, shellfish, tree-nuts, peanuts, wheat, soy, sesame) seeded globally with `family_id = null`; families can add custom allergens. Parent-only mutations.
+- **Per-member allergy profile:** `users.allergen_profile_reviewed_at` timestamp drives a dashboard prompt until each member's profile is explicitly reviewed. Parents may edit anyone; members only their own.
+- **Recipe allergen tagging:** `recipe_allergens` pivot with `(contains, may_contain)` presence + `(ai_auto, ai_suggested, human_confirmed, imported)` source + confidence. Same allergen can appear at both presence levels on one recipe.
+- **Filtering + planner safety:** `GET /recipes?safe_for_members[]=<id>` (or `safe_for=all`) excludes recipes carrying any allergen for the given reviewed-profile members. Unreviewed profiles silently skipped — no false-safe filtering. Meal-plan add_entry refuses with 409 + `requires_acknowledgement` unless caller sends `acknowledge_allergens: true`.
+- **AI integration:** `RecipeImportService` URL/photo prompts dynamically include the family's allergen slug list and extract `allergens: [{slug, presence, confidence}]`. Confidence ≥ 0.95 → `ai_auto`, else `ai_suggested`. One-click confirm on the recipe detail flips a row to `human_confirmed`. Backfill via `php artisan recipes:backfill-allergens` (or `POST /recipes/allergens/backfill`, parent-only, 2/day throttle); worker-level `RateLimited` cap of 30 Anthropic calls/min per family. Job takes both `recipeId` and `familyId` and asserts match.
+- **Multi-image recipes:** `recipe_images` table (UUID, sort_order, is_primary). Backfilled from `recipes.image_path` which stays as a denormalized cache of the primary's path so card readers don't break. `RecipeImageGallery` Vue component: drag-reorder, tap-primary, delete, multi-file upload.
+- **Public sharing:** `recipes.share_token` (unguessable 22-char base62, ~131 bits) + `recipes.share_visible_attribution` (anonymous by default). Public web route `GET /r/{token}` renders a dedicated Blade view with OG/Twitter cards, full-bleed hero + gradient transition, fraction-formatted ingredients, line-art allergen icons, and a Print button (dedicated print stylesheet). Revoke clears the token; old URLs hard-404. `<meta name="robots" content="noindex">` so link leaks don't reach crawlers.
+
+Authorization shape (in addition to existing recipe Policy):
+- `AllergenPolicy` — parents create/rename/delete family customs; Big 9 immutable for everyone
+- `UserAllergenPolicy` — view is family-scoped; edit is parent OR self
+- Mass-assignment hardened: `share_token`, `share_visible_attribution`, `allergen_profile_reviewed_at` are NOT in `$fillable`; writers go through `forceFill`
+
+PWA: `/^\/r\//` added to `navigateFallbackDenylist` so the service worker passes share URLs through to the server.
+
+MCP coverage: 13 new actions in `kinhold-food` covering allergens, per-member profiles, recipe-allergen single-row edits, backfill, and sharing. `recipe_list` accepts `safe_for_members[]` + `safe_for`. `meal_plan_add_entry` accepts `acknowledge_allergens` and surfaces `{requires_acknowledgement, hits}` when blocked.
 
 ## Database Schema (Key Tables)
 
@@ -117,6 +138,12 @@
 - `reward_bids` — id (UUID), family_id, reward_id, user_id, bid_amount, held_points, is_winning, resolved_at (unique: reward_id+user_id)
 - `badges` — id, family_id, created_by, name, description, icon, color, trigger_type, trigger_threshold, is_hidden, is_active
 - `user_badges` — id, user_id, badge_id, earned_at, awarded_by (unique: user_id+badge_id)
+- `allergens` — id (UUID), family_id (nullable: null = global Big 9), name, slug, is_big_nine (bool). Unique (family_id, slug).
+- `member_allergens` — id (UUID), user_id, allergen_id (unique pair). UUID-keyed via `MemberAllergen` pivot.
+- `recipe_allergens` — id (UUID), recipe_id, allergen_id, presence (enum: contains/may_contain), source (enum: ai_auto/ai_suggested/human_confirmed/imported), confidence (decimal 0-1, nullable), confirmed_by, confirmed_at. Unique (recipe_id, allergen_id, presence). UUID-keyed via `RecipeAllergen` pivot.
+- `recipe_images` — id (UUID), recipe_id, path, sort_order, is_primary. `recipes.image_path` is a denormalized cache of the primary's path.
+- `users.allergen_profile_reviewed_at` (timestamp, nullable) — drives the dashboard "set up your allergy profile" prompt.
+- `recipes.share_token` (string, nullable, unique) + `recipes.share_visible_attribution` (bool) — public sharing state.
 
 ## API Route Map
 
@@ -132,6 +159,9 @@ All routes prefixed with `/api/v1/`. Auth routes are public; everything else req
 - **Points:** `GET /points/bank`, `GET /points/leaderboard`, `GET /points/feed`, `POST /points/kudos`, `POST /points/deduct`
 - **Rewards:** CRUD on `/rewards`, `POST /rewards/{id}/purchase`, `GET /rewards/purchases`
 - **Badges:** CRUD on `/badges`, `POST /badges/{id}/award`, `DELETE /badges/{id}/revoke/{user}`, `GET /badges/earned`
+- **Allergens (module: food):** CRUD on `/allergens` (parent-only mutations; Big 9 immutable). Member profile at `/users/{user}/allergens` (GET / PUT / POST mark-reviewed). Recipe-allergen single-row at `/recipes/{recipe}/allergens` (POST add) and `/recipes/{recipe}/allergens/{allergen}` (PATCH confirm / change / remove). Family backfill at `POST /recipes/allergens/backfill` (parent-only, 2/day throttle).
+- **Recipe sharing (module: food, parent-only):** `POST /recipes/{recipe}/share` (publish), `PATCH /recipes/{recipe}/share` (toggle attribution), `DELETE /recipes/{recipe}/share` (revoke). Public render at `GET /r/{token}` (web route, no auth).
+- **Recipe filtering:** `GET /recipes` now accepts `?safe_for_members[]=<id>` (one or more) or `?safe_for=all` to exclude recipes carrying allergens for those reviewed-profile members. Unreviewed profiles are silently skipped.
 - **Config:** `GET /config` (public, pre-auth service detection)
 
 ## File Structure (Key Directories)

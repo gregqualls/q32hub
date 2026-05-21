@@ -62,8 +62,10 @@ class AllergenFilteringTest extends TestCase
             'password' => bcrypt('password'),
             'family_id' => $this->family->id,
             'family_role' => FamilyRole::Child,
-            'allergen_profile_reviewed_at' => now(),
         ]);
+        // allergen_profile_reviewed_at is intentionally not mass-assignable;
+        // use forceFill so tests can stamp the reviewed state.
+        $this->childWithProfile->forceFill(['allergen_profile_reviewed_at' => now()])->save();
 
         $this->childWithoutProfile = User::create([
             'name' => 'Unreviewed Child',
@@ -143,8 +145,8 @@ class AllergenFilteringTest extends TestCase
             'password' => bcrypt('password'),
             'family_id' => $this->family->id,
             'family_role' => FamilyRole::Child,
-            'allergen_profile_reviewed_at' => now(),
         ]);
+        $cleanMember->forceFill(['allergen_profile_reviewed_at' => now()])->save();
 
         Sanctum::actingAs($this->parent);
 

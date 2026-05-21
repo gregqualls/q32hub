@@ -57,7 +57,7 @@ class RecipeService
         return $recipe->load(['ingredients', 'tags', 'allergens', 'images', 'creator']);
     }
 
-    public function updateRecipe(Recipe $recipe, array $data): Recipe
+    public function updateRecipe(Recipe $recipe, array $data, ?User $editor = null): Recipe
     {
         $fields = [
             'title', 'description', 'servings', 'prep_time_minutes', 'cook_time_minutes',
@@ -83,8 +83,10 @@ class RecipeService
         }
 
         if (array_key_exists('allergens', $data)) {
-            $editor = $recipe->creator()->first() ?? auth()->user();
-            $this->syncAllergens($recipe, $editor, $data['allergens'] ?? []);
+            // Attribute allergen edits to the user actually performing the save,
+            // not the original creator. Fall back to auth() for callers that
+            // didn't thread the user (e.g., the artisan command).
+            $this->syncAllergens($recipe, $editor ?? auth()->user(), $data['allergens'] ?? []);
         }
 
         if (array_key_exists('images', $data)) {
@@ -179,7 +181,10 @@ class RecipeService
 
         $perPage = min((int) ($filters['per_page'] ?? 20), 100);
 
-        return $query->with(['ingredients', 'tags', 'allergens', 'images', 'creator', 'ratings'])->paginate($perPage);
+        // Allergens are shown on cards (limited badge row) so we eager-load them.
+        // Images are NOT — cards use `recipe.image_path` (denormalized primary).
+        // The detail view loads the full images relation separately.
+        return $query->with(['ingredients', 'tags', 'allergens', 'creator', 'ratings'])->paginate($perPage);
     }
 
     /**
@@ -235,7 +240,6 @@ class RecipeService
     private function syncImages(Recipe $recipe, array $images): void
     {
         $existingById = $recipe->images()->get()->keyBy('id');
-        $now = now();
         $keptIds = [];
         $primaryPath = null;
 
@@ -288,8 +292,6 @@ class RecipeService
 
         // Sync the denormalized cache so cards keep working
         $recipe->forceFill(['image_path' => $primaryPath])->save();
-
-        unset($now);
     }
 
     /**

@@ -2,10 +2,13 @@
 
 namespace App\Mcp\Tools;
 
+use App\Enums\AllergenSource;
 use App\Enums\MealSlot;
+use App\Exceptions\AllergenAcknowledgementRequired;
 use App\Mcp\Tools\Concerns\MergesUpdates;
 use App\Mcp\Tools\Concerns\RequiresModule;
 use App\Mcp\Tools\Concerns\ScopesToFamily;
+use App\Models\Allergen;
 use App\Models\FamilyRestaurant;
 use App\Models\MealPlan;
 use App\Models\MealPlanEntry;
@@ -13,16 +16,20 @@ use App\Models\MealPreset;
 use App\Models\ProductCatalog;
 use App\Models\Rating;
 use App\Models\Recipe;
+use App\Models\RecipeAllergen;
 use App\Models\Restaurant;
 use App\Models\ShoppingItem;
 use App\Models\ShoppingList;
 use App\Models\Tag;
+use App\Models\User;
+use App\Policies\UserAllergenPolicy;
 use App\Services\MealPlanService;
 use App\Services\RecipeImportService;
 use App\Services\RecipeService;
 use App\Services\RestaurantImportService;
 use App\Services\ShoppingListService;
 use Carbon\Carbon;
+use Illuminate\Support\Str;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
@@ -34,7 +41,7 @@ use Laravel\Mcp\Server\Tool;
 Recipes, shopping lists, meal plans, restaurants, and meal presets — the family kitchen.
 
 Recipes:
-  recipe_list (search?, tag?, favorite?, sort?, per_page?) — Family recipes (paginated).
+  recipe_list (search?, tag?, favorite?, sort?, per_page?, safe_for_members?, safe_for?) — Family recipes (paginated). `safe_for_members` is an array of family-member IDs; recipes containing any of their allergens are excluded. `safe_for: "all"` filters against every reviewed-profile family member. Members without a reviewed profile are silently skipped (no false-safe filtering).
   recipe_show (recipe_id*) — Full recipe with ingredients, cook logs, ratings.
   recipe_create (title*, [recipe fields]) — Subject to recipe_creation policy.
   recipe_update (recipe_id*, [any field]).
@@ -46,6 +53,31 @@ Recipes:
   recipe_rate (recipe_id*, score*) — 1-5.
   recipe_ratings (recipe_id*).
   recipe_import_url (url*, preview?) — Scrape recipe from URL. preview=true returns extracted data without saving.
+
+Recipe create/update accept `allergens: [{allergen_id, presence}]` and `images: [{id?, path, sort_order?, is_primary?}]` arrays for tagging and multi-image management. See allergen actions below for the allergen reference data and the per-member profile.
+
+Recipe sharing (parent-only):
+  recipe_share (recipe_id*, visible_attribution?) — Mint a public token. Idempotent: re-calling returns the same URL.
+  recipe_share_update (recipe_id*, visible_attribution*) — Toggle attribution without rotating the token.
+  recipe_unshare (recipe_id*) — Revoke. Old URL hard-404s; re-sharing later mints a new token.
+
+Recipe-allergen edits (parent-only):
+  recipe_allergen_add (recipe_id*, allergen_id*, presence*) — Add a single (contains|may_contain) row, idempotent on duplicate.
+  recipe_allergen_patch (recipe_id*, row_id*, presence?, action?) — Confirm an AI tag (default), change presence, or remove (action: "remove").
+  recipe_allergen_backfill (force?) — Queue AI allergen extraction across the family's recipes. Idempotent unless force=true. Throttled to 2/day per family.
+
+Allergens (Big 9 are global, custom rows are family-scoped):
+  allergen_list — All allergens available to the family.
+  allergen_create (name*) — Add a custom allergen (parent-only).
+  allergen_update (allergen_id*, name*) — Rename a custom (parent-only). Big 9 immutable.
+  allergen_delete (allergen_id*) — Remove a custom (parent-only). Big 9 immutable.
+
+Member allergy profiles:
+  allergen_profile_show (user_id*) — Read a member's profile (any family member).
+  allergen_profile_set (user_id*, allergen_ids*) — Replace a member's allergens. Parents may edit anyone; members only themselves.
+  allergen_profile_mark_reviewed (user_id*) — Clear the dashboard "not yet reviewed" prompt without changing the list.
+
+Meal plan add_entry accepts `acknowledge_allergens: true` to bypass the safety blocker when a recipe contains an allergen for a reviewed family member. Without the flag, returns `{requires_acknowledgement: true, hits: [...]}` listing the affected (member, allergen, presence) tuples.
 
 Shopping lists & items:
   shopping_list_lists — All family shopping lists.
@@ -113,6 +145,14 @@ class KinholdFood extends Tool
                 'recipe_restore', 'recipe_toggle_favorite',
                 'recipe_add_cook_log', 'recipe_cook_logs', 'recipe_rate', 'recipe_ratings',
                 'recipe_import_url',
+                // Recipe sharing
+                'recipe_share', 'recipe_share_update', 'recipe_unshare',
+                // Recipe-allergen single-row + backfill
+                'recipe_allergen_add', 'recipe_allergen_patch', 'recipe_allergen_backfill',
+                // Allergens (family-scoped reference data)
+                'allergen_list', 'allergen_create', 'allergen_update', 'allergen_delete',
+                // Member allergy profiles
+                'allergen_profile_show', 'allergen_profile_set', 'allergen_profile_mark_reviewed',
                 // Shopping
                 'shopping_list_lists', 'shopping_create_list', 'shopping_show_list',
                 'shopping_update_list', 'shopping_delete_list', 'shopping_complete_trip',
@@ -266,6 +306,27 @@ class KinholdFood extends Tool
             'restaurant_import' => $this->restaurantImport($request),
             'restaurant_rate' => $this->restaurantRate($request),
 
+            // Allergens
+            'allergen_list' => $this->allergenList(),
+            'allergen_create' => $this->allergenCreate($request),
+            'allergen_update' => $this->allergenUpdate($request),
+            'allergen_delete' => $this->allergenDelete($request),
+
+            // Member allergy profile
+            'allergen_profile_show' => $this->allergenProfileShow($request),
+            'allergen_profile_set' => $this->allergenProfileSet($request),
+            'allergen_profile_mark_reviewed' => $this->allergenProfileMarkReviewed($request),
+
+            // Recipe-allergen single-row + backfill
+            'recipe_allergen_add' => $this->recipeAllergenAdd($request),
+            'recipe_allergen_patch' => $this->recipeAllergenPatch($request),
+            'recipe_allergen_backfill' => $this->recipeAllergenBackfill($request),
+
+            // Recipe sharing
+            'recipe_share' => $this->recipeShare($request),
+            'recipe_share_update' => $this->recipeShareUpdate($request),
+            'recipe_unshare' => $this->recipeUnshare($request),
+
             default => Response::error("Unknown action: {$request->get('action')}"),
         };
     }
@@ -283,6 +344,8 @@ class KinholdFood extends Tool
             'favorite' => $request->get('favorite'),
             'sort' => $request->get('sort'),
             'per_page' => $request->get('per_page'),
+            'safe_for' => $request->get('safe_for'),
+            'safe_for_members' => $request->get('safe_for_members'),
         ], fn ($v) => $v !== null);
 
         $recipes = $service->searchRecipes($this->family(), $filters);
@@ -351,7 +414,9 @@ class KinholdFood extends Tool
             'cook_time_minutes' => $request->get('cook_time_minutes'),
             'servings' => $request->get('servings'),
             'image_path' => $request->get('image_path'),
+            'images' => $request->get('images'),
             'tag_ids' => $request->get('tag_ids'),
+            'allergens' => $request->get('allergens'),
         ], fn ($v) => $v !== null);
 
         $recipe = $service->createRecipe($this->family(), $this->user(), $data);
@@ -375,7 +440,7 @@ class KinholdFood extends Tool
 
         $data = $this->mergeUpdates(
             $request,
-            simpleFields: ['title', 'ingredients', 'tag_ids'],
+            simpleFields: ['title', 'ingredients', 'tag_ids', 'allergens', 'images'],
             nullableFields: [
                 'description', 'instructions', 'prep_time_minutes',
                 'cook_time_minutes', 'servings', 'image_path',
@@ -383,7 +448,7 @@ class KinholdFood extends Tool
         );
 
         $service = app(RecipeService::class);
-        $recipe = $service->updateRecipe($recipe, $data);
+        $recipe = $service->updateRecipe($recipe, $data, $this->user());
 
         return Response::json([
             'message' => "Recipe \"{$recipe->title}\" updated.",
@@ -1103,9 +1168,20 @@ class KinholdFood extends Tool
             'servings' => $request->get('servings'),
             'assigned_cooks' => $request->get('assigned_cooks'),
             'sort_order' => $request->get('sort_order'),
+            'acknowledge_allergens' => $request->get('acknowledge_allergens'),
         ], fn ($v) => $v !== null);
 
-        $entry = app(MealPlanService::class)->addEntry($plan, $data, $this->user());
+        try {
+            $entry = app(MealPlanService::class)->addEntry($plan, $data, $this->user());
+        } catch (AllergenAcknowledgementRequired $e) {
+            // Surface the structured hit list so the MCP caller can prompt
+            // the user explicitly before re-sending with acknowledge_allergens=true.
+            return Response::json([
+                'requires_acknowledgement' => true,
+                'message' => $e->getMessage(),
+                'hits' => $e->hits,
+            ]);
+        }
 
         return Response::json([
             'message' => "Added entry for {$date} {$mealSlot}.",
@@ -1741,6 +1817,320 @@ class KinholdFood extends Tool
             'preset' => $e->preset ? ['id' => $e->preset->id, 'label' => $e->preset->label] : null,
             'notes' => $e->notes,
         ];
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Allergens (reference data) + per-member allergy profiles + recipe-allergen
+    // single-row edits + AI backfill + public sharing. See v1.10.0 release.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function allergenList(): Response
+    {
+        $allergens = Allergen::availableToFamily($this->familyId())
+            ->orderByDesc('is_big_nine')
+            ->orderBy('name')
+            ->get(['id', 'family_id', 'name', 'slug', 'is_big_nine']);
+
+        return Response::json(['allergens' => $allergens]);
+    }
+
+    private function allergenCreate(Request $request): Response
+    {
+        if (! $this->user()->isParent()) {
+            return Response::error('Only parents can add custom allergens.');
+        }
+        $name = trim((string) $request->get('name', ''));
+        if ($name === '') {
+            return Response::error('name is required for allergen_create.');
+        }
+        $slug = Str::slug($name);
+        if ($slug === '') {
+            return Response::error('Name must contain at least one alphanumeric character.');
+        }
+        $exists = Allergen::availableToFamily($this->familyId())->where('slug', $slug)->exists();
+        if ($exists) {
+            return Response::error('An allergen with that name already exists.');
+        }
+        $allergen = Allergen::create([
+            'family_id' => $this->familyId(),
+            'name' => $name,
+            'slug' => $slug,
+            'is_big_nine' => false,
+        ]);
+
+        return Response::json(['allergen' => $allergen->only(['id', 'family_id', 'name', 'slug', 'is_big_nine'])]);
+    }
+
+    private function allergenUpdate(Request $request): Response
+    {
+        $allergen = Allergen::find($request->get('allergen_id'));
+        if (! $allergen) {
+            return Response::error('Allergen not found.');
+        }
+        if ($allergen->family_id === null) {
+            return Response::error('Big 9 allergens are immutable.');
+        }
+        if ((string) $allergen->family_id !== (string) $this->familyId() || ! $this->user()->isParent()) {
+            return Response::error('Not authorized to modify this allergen.');
+        }
+        $name = trim((string) $request->get('name', ''));
+        if ($name === '') {
+            return Response::error('name is required for allergen_update.');
+        }
+        $slug = Str::slug($name);
+        $dup = Allergen::availableToFamily($this->familyId())
+            ->where('slug', $slug)->where('id', '!=', $allergen->id)->exists();
+        if ($dup) {
+            return Response::error('An allergen with that name already exists.');
+        }
+        $allergen->update(['name' => $name, 'slug' => $slug]);
+
+        return Response::json(['allergen' => $allergen->only(['id', 'family_id', 'name', 'slug', 'is_big_nine'])]);
+    }
+
+    private function allergenDelete(Request $request): Response
+    {
+        $allergen = Allergen::find($request->get('allergen_id'));
+        if (! $allergen) {
+            return Response::error('Allergen not found.');
+        }
+        if ($allergen->family_id === null) {
+            return Response::error('Big 9 allergens cannot be removed.');
+        }
+        if ((string) $allergen->family_id !== (string) $this->familyId() || ! $this->user()->isParent()) {
+            return Response::error('Not authorized.');
+        }
+        $allergen->delete();
+
+        return Response::json(['deleted' => true]);
+    }
+
+    private function allergenProfileShow(Request $request): Response
+    {
+        $member = $this->resolveFamilyMember($request->get('user_id'));
+        if ($member instanceof Response) {
+            return $member;
+        }
+        if (! (new UserAllergenPolicy)->view($this->user(), $member)) {
+            return Response::error('Not authorized.');
+        }
+
+        return Response::json([
+            'member_id' => $member->id,
+            'allergen_ids' => $member->allergens()->pluck('allergens.id')->values(),
+            'reviewed_at' => optional($member->allergen_profile_reviewed_at)->toIso8601String(),
+        ]);
+    }
+
+    private function allergenProfileSet(Request $request): Response
+    {
+        $member = $this->resolveFamilyMember($request->get('user_id'));
+        if ($member instanceof Response) {
+            return $member;
+        }
+        if (! (new UserAllergenPolicy)->update($this->user(), $member)) {
+            return Response::error('Not authorized.');
+        }
+        $ids = (array) $request->get('allergen_ids', []);
+        $valid = Allergen::availableToFamily($this->familyId())
+            ->whereIn('id', $ids)->pluck('id')->all();
+        if (count($valid) !== count($ids)) {
+            return Response::error('One or more allergens are not available to this family.');
+        }
+        $member->allergens()->sync($valid);
+        $member->forceFill(['allergen_profile_reviewed_at' => now()])->save();
+
+        return Response::json([
+            'member_id' => $member->id,
+            'allergen_ids' => $member->allergens()->pluck('allergens.id')->values(),
+            'reviewed_at' => $member->allergen_profile_reviewed_at->toIso8601String(),
+        ]);
+    }
+
+    private function allergenProfileMarkReviewed(Request $request): Response
+    {
+        $member = $this->resolveFamilyMember($request->get('user_id'));
+        if ($member instanceof Response) {
+            return $member;
+        }
+        if (! (new UserAllergenPolicy)->update($this->user(), $member)) {
+            return Response::error('Not authorized.');
+        }
+        $member->forceFill(['allergen_profile_reviewed_at' => now()])->save();
+
+        return Response::json([
+            'member_id' => $member->id,
+            'reviewed_at' => $member->allergen_profile_reviewed_at->toIso8601String(),
+        ]);
+    }
+
+    private function recipeAllergenAdd(Request $request): Response
+    {
+        $recipe = $this->findRecipe($request->get('recipe_id'));
+        if ($recipe instanceof Response) {
+            return $recipe;
+        }
+        if ($denied = $this->authorize('update', $recipe)) {
+            return $denied;
+        }
+        $allergenId = $request->get('allergen_id');
+        $presence = $request->get('presence');
+        if (! $allergenId || ! in_array($presence, ['contains', 'may_contain'], true)) {
+            return Response::error('allergen_id and presence (contains|may_contain) are required.');
+        }
+        $allergen = Allergen::availableToFamily($recipe->family_id)->where('id', $allergenId)->first();
+        if (! $allergen) {
+            return Response::error('Allergen is not available to this family.');
+        }
+        $row = RecipeAllergen::firstOrCreate([
+            'recipe_id' => $recipe->id,
+            'allergen_id' => $allergen->id,
+            'presence' => $presence,
+        ], [
+            'id' => (string) Str::uuid(),
+            'source' => AllergenSource::HumanConfirmed->value,
+            'confirmed_by' => $this->user()->id,
+            'confirmed_at' => now(),
+        ]);
+
+        return Response::json(['allergen' => $row->only(['id', 'recipe_id', 'allergen_id', 'presence', 'source'])]);
+    }
+
+    private function recipeAllergenPatch(Request $request): Response
+    {
+        $recipe = $this->findRecipe($request->get('recipe_id'));
+        if ($recipe instanceof Response) {
+            return $recipe;
+        }
+        if ($denied = $this->authorize('update', $recipe)) {
+            return $denied;
+        }
+        $row = RecipeAllergen::where('recipe_id', $recipe->id)
+            ->where('id', $request->get('row_id'))
+            ->first();
+        if (! $row) {
+            return Response::error('Recipe-allergen row not found.');
+        }
+        if ($request->get('action') === 'remove') {
+            $row->delete();
+
+            return Response::json(['removed' => true]);
+        }
+        $update = [
+            'source' => AllergenSource::HumanConfirmed->value,
+            'confirmed_by' => $this->user()->id,
+            'confirmed_at' => now(),
+        ];
+        if (in_array($request->get('presence'), ['contains', 'may_contain'], true)) {
+            $update['presence'] = $request->get('presence');
+        }
+        $row->update($update);
+
+        return Response::json(['allergen' => $row->fresh()->only(['id', 'recipe_id', 'allergen_id', 'presence', 'source'])]);
+    }
+
+    private function recipeAllergenBackfill(Request $request): Response
+    {
+        if (! $this->user()->isParent()) {
+            return Response::error('Only parents can run the allergen backfill.');
+        }
+        $service = app(RecipeImportService::class);
+        $force = (bool) $request->get('force', false);
+        $count = $service->queueAllergenBackfill((string) $this->familyId(), $force);
+
+        return Response::json([
+            'queued' => $count,
+            'message' => "Queued {$count} recipe(s) for AI allergen tagging.",
+        ]);
+    }
+
+    private function recipeShare(Request $request): Response
+    {
+        $recipe = $this->findRecipe($request->get('recipe_id'));
+        if ($recipe instanceof Response) {
+            return $recipe;
+        }
+        if ($denied = $this->authorize('update', $recipe)) {
+            return $denied;
+        }
+        if (! $recipe->isShared()) {
+            do {
+                $token = Str::random(22);
+            } while (Recipe::where('share_token', $token)->exists());
+            $recipe->forceFill(['share_token' => $token])->save();
+        }
+        if ($request->has('visible_attribution')) {
+            $recipe->forceFill(['share_visible_attribution' => (bool) $request->get('visible_attribution')])->save();
+        }
+
+        return Response::json([
+            'is_shared' => true,
+            'url' => $recipe->shareUrl(),
+            'visible_attribution' => (bool) $recipe->share_visible_attribution,
+        ]);
+    }
+
+    private function recipeShareUpdate(Request $request): Response
+    {
+        $recipe = $this->findRecipe($request->get('recipe_id'));
+        if ($recipe instanceof Response) {
+            return $recipe;
+        }
+        if ($denied = $this->authorize('update', $recipe)) {
+            return $denied;
+        }
+        if (! $recipe->isShared()) {
+            return Response::error('Recipe is not shared yet.');
+        }
+        $recipe->forceFill([
+            'share_visible_attribution' => (bool) $request->get('visible_attribution'),
+        ])->save();
+
+        return Response::json([
+            'is_shared' => true,
+            'url' => $recipe->shareUrl(),
+            'visible_attribution' => (bool) $recipe->share_visible_attribution,
+        ]);
+    }
+
+    private function recipeUnshare(Request $request): Response
+    {
+        $recipe = $this->findRecipe($request->get('recipe_id'));
+        if ($recipe instanceof Response) {
+            return $recipe;
+        }
+        if ($denied = $this->authorize('update', $recipe)) {
+            return $denied;
+        }
+        $recipe->forceFill([
+            'share_token' => null,
+            'share_visible_attribution' => false,
+        ])->save();
+
+        return Response::json([
+            'is_shared' => false,
+            'url' => null,
+            'visible_attribution' => false,
+        ]);
+    }
+
+    /**
+     * Resolve a user by id and confirm they belong to the calling family.
+     * Returns the User or a 404-equivalent Response::error.
+     */
+    private function resolveFamilyMember(?string $userId): User|Response
+    {
+        if (! $userId) {
+            return Response::error('user_id is required.');
+        }
+        $member = User::where('id', $userId)
+            ->where('family_id', $this->familyId())
+            ->first();
+        if (! $member) {
+            return Response::error('Family member not found.');
+        }
+
+        return $member;
     }
 
     private function scopedTagIds(array $tagIds): array

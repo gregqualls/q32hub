@@ -237,8 +237,10 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{recipe}/allergens', [RecipeAllergenController::class, 'store']);
                 Route::patch('/{recipe}/allergens/{allergen}', [RecipeAllergenController::class, 'update']);
 
-                // Family-wide AI allergen backfill (parent only)
-                Route::post('/allergens/backfill', [RecipeAllergenController::class, 'backfill']);
+                // Family-wide AI allergen backfill (parent only, throttled
+                // to 2/day per family to keep Anthropic costs bounded)
+                Route::post('/allergens/backfill', [RecipeAllergenController::class, 'backfill'])
+                    ->middleware('throttle:allergen-backfill-dispatch');
 
                 // Public sharing (parent only)
                 Route::post('/{recipe}/share', [RecipeShareController::class, 'store']);

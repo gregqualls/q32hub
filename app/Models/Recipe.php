@@ -32,8 +32,9 @@ class Recipe extends Model
         'notes',
         'is_favorite',
         'sort_order',
-        'share_token',
-        'share_visible_attribution',
+        // Share columns are intentionally NOT fillable. RecipeShareController
+        // uses forceFill so the public-link token can never be set via the
+        // recipe create/update API surface (mass-assignment safety).
     ];
 
     protected $casts = [

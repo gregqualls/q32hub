@@ -63,7 +63,7 @@ class RecipeController extends Controller
     {
         $this->authorize('update', $recipe);
 
-        $recipe = $this->recipeService->updateRecipe($recipe, $request->validated());
+        $recipe = $this->recipeService->updateRecipe($recipe, $request->validated(), $request->user());
 
         return response()->json(['recipe' => new RecipeResource($recipe)]);
     }

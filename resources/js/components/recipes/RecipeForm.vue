@@ -164,7 +164,9 @@
           class="flex items-start gap-2"
         >
           <!-- Step number -->
-          <span class="w-7 h-7 rounded-full bg-[#C4975A]/10 text-[#C4975A] text-xs font-semibold flex items-center justify-center flex-shrink-0 mt-1">
+          <span
+            class="w-7 h-7 rounded-full bg-[#C4975A]/10 text-[#C4975A] text-xs font-semibold flex items-center justify-center flex-shrink-0 mt-1"
+          >
             {{ index + 1 }}
           </span>
           <!-- Step text -->
@@ -204,10 +206,16 @@
           :key="tag.id"
           type="button"
           class="px-3 py-1.5 text-xs font-medium rounded-full transition-colors"
-          :class="form.tag_ids.includes(tag.id)
-            ? 'text-white'
-            : 'bg-surface-sunken text-ink-secondary hover:bg-surface-overlay'"
-          :style="form.tag_ids.includes(tag.id) ? { backgroundColor: tag.color || '#C4975A' } : {}"
+          :class="
+            form.tag_ids.includes(tag.id)
+              ? 'text-white'
+              : 'bg-surface-sunken text-ink-secondary hover:bg-surface-overlay'
+          "
+          :style="
+            form.tag_ids.includes(tag.id)
+              ? { backgroundColor: tag.color || '#C4975A' }
+              : {}
+          "
           @click="toggleTag(tag.id)"
         >
           {{ tag.name }}
@@ -221,12 +229,18 @@
       <p class="text-xs text-ink-secondary mb-2">
         Tap once for "contains", twice for "may contain", three times to clear.
       </p>
-      <div class="flex flex-wrap gap-2">
+      <div
+        class="flex flex-wrap gap-2"
+        role="group"
+        aria-label="Allergens this recipe contains"
+      >
         <button
           v-for="allergen in allergensStore.allergens"
           :key="allergen.id"
           type="button"
           :class="allergenChipClass(allergen.id)"
+          :aria-pressed="allergenState(allergen.id) !== 'off'"
+          :aria-label="`${allergen.name}: ${allergenStateLabel(allergen.id)}`"
           @click="cycleAllergen(allergen.id)"
         >
           {{ allergenChipLabel(allergen) }}
@@ -259,263 +273,312 @@
         class="px-6 py-2.5 text-sm font-medium text-white bg-[#C4975A] hover:bg-[#D4A96A] rounded-[10px] transition-colors disabled:opacity-50"
         :disabled="!form.title || saving"
       >
-        {{ saving ? 'Saving...' : (recipe ? 'Update Recipe' : 'Save Recipe') }}
+        {{ saving ? "Saving..." : recipe ? "Update Recipe" : "Save Recipe" }}
       </button>
     </div>
   </form>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
-import { storeToRefs } from 'pinia'
-import { useRecipesStore } from '@/stores/recipes'
-import { useAllergensStore } from '@/stores/allergens'
-import { useAuthStore } from '@/stores/auth'
-import { XMarkIcon } from '@heroicons/vue/24/outline'
-import RecipeImageGallery from '@/components/recipes/RecipeImageGallery.vue'
+import { ref, reactive, computed, onMounted, watch } from "vue";
+import { storeToRefs } from "pinia";
+import { useRecipesStore } from "@/stores/recipes";
+import { useAllergensStore } from "@/stores/allergens";
+import { useAuthStore } from "@/stores/auth";
+import { XMarkIcon } from "@heroicons/vue/24/outline";
+import RecipeImageGallery from "@/components/recipes/RecipeImageGallery.vue";
 
 // Convert a decimal like 0.5 to a display string like "1/2" for common fractions.
 // Used when loading stored recipes into the form.
 const decimalToFraction = (value) => {
-  if (value === null || value === undefined || value === '') return ''
-  const num = parseFloat(value)
-  if (isNaN(num)) return String(value)
-  if (num === Math.floor(num)) return String(Math.floor(num))
+  if (value === null || value === undefined || value === "") return "";
+  const num = parseFloat(value);
+  if (isNaN(num)) return String(value);
+  if (num === Math.floor(num)) return String(Math.floor(num));
 
-  const whole = Math.floor(num)
-  const dec = Math.round((num - whole) * 1000) / 1000
-  const map = { 0.125: '1/8', 0.25: '1/4', 0.333: '1/3', 0.375: '3/8', 0.5: '1/2', 0.625: '5/8', 0.667: '2/3', 0.75: '3/4', 0.875: '7/8' }
+  const whole = Math.floor(num);
+  const dec = Math.round((num - whole) * 1000) / 1000;
+  const map = {
+    0.125: "1/8",
+    0.25: "1/4",
+    0.333: "1/3",
+    0.375: "3/8",
+    0.5: "1/2",
+    0.625: "5/8",
+    0.667: "2/3",
+    0.75: "3/4",
+    0.875: "7/8",
+  };
 
-  const frac = Object.entries(map).find(([d]) => Math.abs(dec - parseFloat(d)) < 0.005)?.[1]
-  if (!frac) return String(num)
-  return whole > 0 ? `${whole} ${frac}` : frac
-}
+  const frac = Object.entries(map).find(
+    ([d]) => Math.abs(dec - parseFloat(d)) < 0.005,
+  )?.[1];
+  if (!frac) return String(num);
+  return whole > 0 ? `${whole} ${frac}` : frac;
+};
 
 // Parse a fraction/unicode/mixed-number string to a float for the API payload.
 // Returns the original string if it's already numeric, or null if empty.
 const parseFractionToFloat = (value) => {
-  if (value === null || value === undefined || value === '') return null
-  const str = String(value).trim()
-  if (str === '') return null
-  if (Number.isFinite(Number(str))) return Number(str)
+  if (value === null || value === undefined || value === "") return null;
+  const str = String(value).trim();
+  if (str === "") return null;
+  if (Number.isFinite(Number(str))) return Number(str);
 
-  const unicodeMap = { '½': 0.5, '¼': 0.25, '¾': 0.75, '⅓': 1/3, '⅔': 2/3, '⅛': 0.125, '⅜': 0.375, '⅝': 0.625, '⅞': 0.875 }
-  if (unicodeMap[str] !== undefined) return unicodeMap[str]
+  const unicodeMap = {
+    "½": 0.5,
+    "¼": 0.25,
+    "¾": 0.75,
+    "⅓": 1 / 3,
+    "⅔": 2 / 3,
+    "⅛": 0.125,
+    "⅜": 0.375,
+    "⅝": 0.625,
+    "⅞": 0.875,
+  };
+  if (unicodeMap[str] !== undefined) return unicodeMap[str];
 
   // Integer + unicode: "1½"
   for (const [ch, frac] of Object.entries(unicodeMap)) {
-    const m = str.match(new RegExp('^(\\d+)' + ch + '$'))
-    if (m) return parseInt(m[1]) + frac
-    const m2 = str.match(new RegExp('^(\\d+)\\s+' + ch + '$'))
-    if (m2) return parseInt(m2[1]) + frac
+    const m = str.match(new RegExp("^(\\d+)" + ch + "$"));
+    if (m) return parseInt(m[1]) + frac;
+    const m2 = str.match(new RegExp("^(\\d+)\\s+" + ch + "$"));
+    if (m2) return parseInt(m2[1]) + frac;
   }
 
   // Simple fraction: "1/2"
-  const sf = str.match(/^(\d+)\s*\/\s*(\d+)$/)
-  if (sf && parseInt(sf[2]) !== 0) return parseInt(sf[1]) / parseInt(sf[2])
+  const sf = str.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (sf && parseInt(sf[2]) !== 0) return parseInt(sf[1]) / parseInt(sf[2]);
 
   // Mixed number: "1 1/2"
-  const mf = str.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/)
-  if (mf && parseInt(mf[3]) !== 0) return parseInt(mf[1]) + parseInt(mf[2]) / parseInt(mf[3])
+  const mf = str.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+  if (mf && parseInt(mf[3]) !== 0)
+    return parseInt(mf[1]) + parseInt(mf[2]) / parseInt(mf[3]);
 
-  return str // Return as-is; backend will reject if truly invalid
-}
+  return str; // Return as-is; backend will reject if truly invalid
+};
 
 const props = defineProps({
   recipe: { type: Object, default: null },
   initialData: { type: Object, default: null },
-})
+});
 
-const emit = defineEmits(['save', 'cancel'])
+const emit = defineEmits(["save", "cancel"]);
 
-const recipesStore = useRecipesStore()
-const allergensStore = useAllergensStore()
-const authStore = useAuthStore()
-const { tags: allTags } = storeToRefs(recipesStore)
+const recipesStore = useRecipesStore();
+const allergensStore = useAllergensStore();
+const authStore = useAuthStore();
+const { tags: allTags } = storeToRefs(recipesStore);
 
-const foodEnabled = computed(() => authStore.userCanAccessModule('food'))
+const foodEnabled = computed(() => authStore.userCanAccessModule("food"));
 
 // Server returns only food-scoped tags via the recipes store.
-const recipeTags = computed(() => allTags.value)
+const recipeTags = computed(() => allTags.value);
 
-const saving = ref(false)
+const saving = ref(false);
 
 const createEmptyForm = () => ({
-  title: '',
-  description: '',
+  title: "",
+  description: "",
   servings: 4,
   prep_time_minutes: null,
   cook_time_minutes: null,
-  source_url: '',
-  source_type: 'manual',
-  notes: '',
+  source_url: "",
+  source_type: "manual",
+  notes: "",
   ingredients: [],
   instructions: [],
   tag_ids: [],
   allergens: [], // [{ allergen_id, presence }]
-  images: [],    // [{ id?, path, sort_order, is_primary }]
-})
+  images: [], // [{ id?, path, sort_order, is_primary }]
+});
 
-const form = reactive(createEmptyForm())
+const form = reactive(createEmptyForm());
 
 const populateFromRecipe = (recipe) => {
-  form.title = recipe.title || ''
-  form.description = recipe.description || ''
-  form.servings = recipe.servings || 4
-  form.prep_time_minutes = recipe.prep_time_minutes || null
-  form.cook_time_minutes = recipe.cook_time_minutes || null
-  form.source_url = recipe.source_url || ''
-  form.source_type = recipe.source_type || 'manual'
-  form.notes = recipe.notes || ''
+  form.title = recipe.title || "";
+  form.description = recipe.description || "";
+  form.servings = recipe.servings || 4;
+  form.prep_time_minutes = recipe.prep_time_minutes || null;
+  form.cook_time_minutes = recipe.cook_time_minutes || null;
+  form.source_url = recipe.source_url || "";
+  form.source_type = recipe.source_type || "manual";
+  form.notes = recipe.notes || "";
   // Hydrate the gallery. If the recipe was migrated from the old single-image
   // column, recipe.images is already a single primary entry.
-  form.images = (recipe.images && recipe.images.length > 0)
-    ? recipe.images.map((img) => ({
-        id: img.id,
-        path: img.path,
-        sort_order: img.sort_order,
-        is_primary: img.is_primary,
-      }))
-    : (recipe.image_path ? [{ path: recipe.image_path, sort_order: 0, is_primary: true }] : [])
+  form.images =
+    recipe.images && recipe.images.length > 0
+      ? recipe.images.map((img) => ({
+          id: img.id,
+          path: img.path,
+          sort_order: img.sort_order,
+          is_primary: img.is_primary,
+        }))
+      : recipe.image_path
+        ? [{ path: recipe.image_path, sort_order: 0, is_primary: true }]
+        : [];
   form.ingredients = (recipe.ingredients || []).map((ing) => ({
-    name: ing.name || '',
+    name: ing.name || "",
     quantity: decimalToFraction(ing.quantity),
-    unit: ing.unit || '',
-    preparation: ing.preparation || '',
-    group_name: ing.group_name || '',
+    unit: ing.unit || "",
+    preparation: ing.preparation || "",
+    group_name: ing.group_name || "",
     is_optional: ing.is_optional || false,
-  }))
+  }));
   form.instructions = (recipe.instructions || []).map((step) =>
-    typeof step === 'string' ? step : (step.text || '')
-  )
-  form.tag_ids = (recipe.tags || []).map((t) => t.id)
+    typeof step === "string" ? step : step.text || "",
+  );
+  form.tag_ids = (recipe.tags || []).map((t) => t.id);
   form.allergens = (recipe.allergens || []).map((a) => ({
     allergen_id: a.id,
-    presence: a.presence || 'contains',
-  }))
-}
+    presence: a.presence || "contains",
+  }));
+};
 
 const populateFromImportPreview = (data) => {
-  form.title = data.title || ''
-  form.description = data.description || ''
-  form.servings = data.servings || 4
-  form.prep_time_minutes = data.prep_time || data.prep_time_minutes || null
-  form.cook_time_minutes = data.cook_time || data.cook_time_minutes || null
-  form.source_url = data.source_url || ''
-  form.source_type = data.source_type || 'url'
-  form.images = data.image_path ? [{ path: data.image_path, sort_order: 0, is_primary: true }] : []
+  form.title = data.title || "";
+  form.description = data.description || "";
+  form.servings = data.servings || 4;
+  form.prep_time_minutes = data.prep_time || data.prep_time_minutes || null;
+  form.cook_time_minutes = data.cook_time || data.cook_time_minutes || null;
+  form.source_url = data.source_url || "";
+  form.source_type = data.source_type || "url";
+  form.images = data.image_path
+    ? [{ path: data.image_path, sort_order: 0, is_primary: true }]
+    : [];
   form.ingredients = (data.ingredients || []).map((ing) => ({
-    name: ing.name || '',
+    name: ing.name || "",
     quantity: decimalToFraction(ing.quantity),
-    unit: ing.unit || '',
-    preparation: ing.preparation || '',
-    group_name: '',
+    unit: ing.unit || "",
+    preparation: ing.preparation || "",
+    group_name: "",
     is_optional: false,
-  }))
+  }));
   form.instructions = (data.instructions || []).map((step) =>
-    typeof step === 'string' ? step : (step.text || '')
-  )
-  form.tag_ids = []
+    typeof step === "string" ? step : step.text || "",
+  );
+  form.tag_ids = [];
 
   // AI-suggested allergens come in as {slug, presence, confidence}. Translate
   // them to the form's shape using the loaded allergen list. If the allergens
   // store hasn't loaded yet, do it now and re-populate when it arrives.
   const mapAiAllergens = () => {
-    const bySlug = new Map((allergensStore.allergens || []).map((a) => [a.slug, a.id]))
+    const bySlug = new Map(
+      (allergensStore.allergens || []).map((a) => [a.slug, a.id]),
+    );
     form.allergens = (data.allergens || [])
       .map((entry) => ({
         allergen_id: bySlug.get(entry.slug),
-        presence: entry.presence || 'contains',
+        presence: entry.presence || "contains",
       }))
-      .filter((entry) => entry.allergen_id)
-  }
+      .filter((entry) => entry.allergen_id);
+  };
 
   if (foodEnabled.value && allergensStore.allergens.length === 0) {
-    allergensStore.fetchAllergens().then(mapAiAllergens)
+    allergensStore.fetchAllergens().then(mapAiAllergens);
   } else {
-    mapAiAllergens()
+    mapAiAllergens();
   }
-}
+};
 
 // ── Ingredient actions ──
 
 const addIngredient = () => {
-  form.ingredients.push({ name: '', quantity: '', unit: '', preparation: '', group_name: '', is_optional: false })
-}
+  form.ingredients.push({
+    name: "",
+    quantity: "",
+    unit: "",
+    preparation: "",
+    group_name: "",
+    is_optional: false,
+  });
+};
 
 const removeIngredient = (index) => {
-  form.ingredients.splice(index, 1)
-}
+  form.ingredients.splice(index, 1);
+};
 
 // ── Instruction actions ──
 
 const addInstruction = () => {
-  form.instructions.push('')
-}
+  form.instructions.push("");
+};
 
 const removeInstruction = (index) => {
-  form.instructions.splice(index, 1)
-}
+  form.instructions.splice(index, 1);
+};
 
 // ── Image upload (used by RecipeImageGallery) ──
 
 const uploadRecipeImage = async (file) => {
-  const result = await recipesStore.uploadImage(file)
+  const result = await recipesStore.uploadImage(file);
   if (result.success) {
     // Gallery owns the form.images array; return just the path so it can append.
-    return { success: true, url: result.imagePath }
+    return { success: true, url: result.imagePath };
   }
-  return { success: false }
-}
+  return { success: false };
+};
 
 // ── Tag toggle ──
 
 const toggleTag = (tagId) => {
-  const idx = form.tag_ids.indexOf(tagId)
+  const idx = form.tag_ids.indexOf(tagId);
   if (idx === -1) {
-    form.tag_ids.push(tagId)
+    form.tag_ids.push(tagId);
   } else {
-    form.tag_ids.splice(idx, 1)
+    form.tag_ids.splice(idx, 1);
   }
-}
+};
 
 // ── Allergen tri-state cycle: off → contains → may_contain → off ──
 
 const allergenState = (id) => {
-  const entry = form.allergens.find((a) => a.allergen_id === id)
-  return entry?.presence || 'off'
-}
+  const entry = form.allergens.find((a) => a.allergen_id === id);
+  return entry?.presence || "off";
+};
 
 const cycleAllergen = (id) => {
-  const idx = form.allergens.findIndex((a) => a.allergen_id === id)
+  const idx = form.allergens.findIndex((a) => a.allergen_id === id);
   if (idx === -1) {
-    form.allergens.push({ allergen_id: id, presence: 'contains' })
-  } else if (form.allergens[idx].presence === 'contains') {
-    form.allergens[idx] = { allergen_id: id, presence: 'may_contain' }
+    form.allergens.push({ allergen_id: id, presence: "contains" });
+  } else if (form.allergens[idx].presence === "contains") {
+    form.allergens[idx] = { allergen_id: id, presence: "may_contain" };
   } else {
-    form.allergens.splice(idx, 1)
+    form.allergens.splice(idx, 1);
   }
-}
+};
 
 const allergenChipClass = (id) => {
-  const base = 'px-3 py-1.5 text-xs font-semibold rounded-full border-2 transition-colors'
-  const state = allergenState(id)
-  if (state === 'contains') return `${base} bg-status-failed text-white border-status-failed`
-  if (state === 'may_contain') return `${base} bg-status-warning/15 text-status-warning border-status-warning border-dashed`
-  return `${base} bg-surface-sunken text-ink-secondary border-transparent font-medium hover:bg-surface-overlay`
-}
+  const base =
+    "px-3 py-1.5 text-xs font-semibold rounded-full border-2 transition-colors";
+  const state = allergenState(id);
+  if (state === "contains")
+    return `${base} bg-status-failed text-white border-status-failed`;
+  if (state === "may_contain")
+    return `${base} bg-status-warning/15 text-status-warning border-status-warning border-dashed`;
+  return `${base} bg-surface-sunken text-ink-secondary border-transparent font-medium hover:bg-surface-overlay`;
+};
 
 const allergenChipLabel = (allergen) => {
-  const state = allergenState(allergen.id)
-  if (state === 'may_contain') return `May contain ${allergen.name.toLowerCase()}`
-  return allergen.name
-}
+  const state = allergenState(allergen.id);
+  if (state === "may_contain")
+    return `May contain ${allergen.name.toLowerCase()}`;
+  return allergen.name;
+};
+
+// Screen-reader status description for the tri-state chip.
+const allergenStateLabel = (id) => {
+  const state = allergenState(id);
+  if (state === "contains") return "contains, press to mark may contain";
+  if (state === "may_contain") return "may contain, press to clear";
+  return "not present, press to mark contains";
+};
 
 // ── Submit ──
 
 const handleSubmit = () => {
-  if (!form.title) return
-  saving.value = true
+  if (!form.title) return;
+  saving.value = true;
 
   // Build the payload matching the API schema
   const payload = {
@@ -525,7 +588,7 @@ const handleSubmit = () => {
     prep_time_minutes: form.prep_time_minutes || null,
     cook_time_minutes: form.cook_time_minutes || null,
     source_url: form.source_url || null,
-    source_type: form.source_type || 'manual',
+    source_type: form.source_type || "manual",
     notes: form.notes || null,
     ingredients: form.ingredients
       .filter((ing) => ing.name.trim())
@@ -549,34 +612,38 @@ const handleSubmit = () => {
       sort_order: idx,
       is_primary: idx === 0,
     })),
-  }
+  };
 
-  emit('save', payload)
+  emit("save", payload);
   // Parent is responsible for resetting saving state
-}
+};
 
 // Watch for external data changes
-watch(() => props.initialData, (data) => {
-  if (data) populateFromImportPreview(data)
-}, { immediate: true })
+watch(
+  () => props.initialData,
+  (data) => {
+    if (data) populateFromImportPreview(data);
+  },
+  { immediate: true },
+);
 
 onMounted(() => {
   if (props.recipe) {
-    populateFromRecipe(props.recipe)
+    populateFromRecipe(props.recipe);
   } else if (props.initialData) {
-    populateFromImportPreview(props.initialData)
+    populateFromImportPreview(props.initialData);
   }
 
   // Ensure tags are loaded
   if (allTags.value.length === 0) {
-    recipesStore.fetchTags()
+    recipesStore.fetchTags();
   }
 
   // Load allergens (food module gating already enforced at API level)
   if (foodEnabled.value && allergensStore.allergens.length === 0) {
-    allergensStore.fetchAllergens()
+    allergensStore.fetchAllergens();
   }
-})
+});
 
-defineExpose({ saving })
+defineExpose({ saving });
 </script>

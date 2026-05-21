@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\AllergenSource;
+use App\Jobs\BackfillRecipeAllergens;
 use App\Models\Allergen;
 use App\Models\Family;
 use App\Models\Recipe;
@@ -809,6 +810,35 @@ PROMPT
         }
 
         return $written;
+    }
+
+    /**
+     * Queue an AI allergen backfill across a family's recipes. Iterates in
+     * chunks so a 10k-recipe family doesn't OOM the dispatcher. Returns the
+     * number of jobs queued. Used by both `POST /api/v1/recipes/allergens/
+     * backfill` and `php artisan recipes:backfill-allergens` so the two paths
+     * can't drift.
+     */
+    public function queueAllergenBackfill(string $familyId, bool $force = false): int
+    {
+        $query = Recipe::where('family_id', $familyId);
+        if (! $force) {
+            $query->doesntHave('allergens');
+        }
+
+        $count = 0;
+        $query->chunkById(100, function ($chunk) use (&$count, $familyId, $force) {
+            foreach ($chunk as $recipe) {
+                BackfillRecipeAllergens::dispatch(
+                    (string) $recipe->id,
+                    $familyId,
+                    $force
+                );
+                $count++;
+            }
+        });
+
+        return $count;
     }
 
     /**

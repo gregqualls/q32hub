@@ -5,18 +5,19 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Allergen;
 use App\Models\User;
+use App\Policies\UserAllergenPolicy;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class UserAllergenController extends Controller
 {
     /**
-     * Read a member's allergy profile. Auth: any family member can read any other
-     * family member's profile (allergies are not private within a family).
+     * Read a member's allergy profile. Auth: any family member can read any
+     * other family member's profile (allergies are not private within a family).
      */
     public function index(Request $request, User $user): JsonResponse
     {
-        $this->assertSameFamily($request, $user);
+        $this->authorizeView($request->user(), $user);
 
         return response()->json([
             'allergen_ids' => $user->allergens()->pluck('allergens.id')->values(),
@@ -30,8 +31,7 @@ class UserAllergenController extends Controller
      */
     public function update(Request $request, User $user): JsonResponse
     {
-        $this->assertSameFamily($request, $user);
-        $this->assertCanEdit($request, $user);
+        $this->authorizeEdit($request->user(), $user);
 
         $validated = $request->validate([
             'allergen_ids' => ['present', 'array'],
@@ -65,8 +65,7 @@ class UserAllergenController extends Controller
      */
     public function markReviewed(Request $request, User $user): JsonResponse
     {
-        $this->assertSameFamily($request, $user);
-        $this->assertCanEdit($request, $user);
+        $this->authorizeEdit($request->user(), $user);
 
         $user->forceFill(['allergen_profile_reviewed_at' => now()])->save();
 
@@ -75,23 +74,27 @@ class UserAllergenController extends Controller
         ]);
     }
 
-    private function assertSameFamily(Request $request, User $user): void
+    /**
+     * Cross-family access returns 404 (don't leak existence). Same-family but
+     * unauthorized actions return 403.
+     */
+    private function authorizeView(User $actor, User $target): void
     {
-        $current = $request->user();
-        if ($current->family_id !== $user->family_id) {
+        if ($actor->family_id !== $target->family_id) {
             abort(404);
+        }
+        if (! (new UserAllergenPolicy)->view($actor, $target)) {
+            abort(403);
         }
     }
 
-    private function assertCanEdit(Request $request, User $user): void
+    private function authorizeEdit(User $actor, User $target): void
     {
-        $current = $request->user();
-        if ($current->isParent()) {
-            return;
+        if ($actor->family_id !== $target->family_id) {
+            abort(404);
         }
-        if ((string) $current->id === (string) $user->id) {
-            return;
+        if (! (new UserAllergenPolicy)->update($actor, $target)) {
+            abort(403, 'Only parents can edit another member\'s allergy profile.');
         }
-        abort(403, 'Only parents can edit another member\'s allergy profile.');
     }
 }

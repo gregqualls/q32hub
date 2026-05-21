@@ -17,12 +17,13 @@ class PublicRecipeController extends Controller
      */
     public function show(string $token): View
     {
+        // Family is loaded only for `share_visible_attribution`; the Blade view
+        // never reads `creator`, so it's deliberately omitted from the with().
         $recipe = Recipe::with([
             'images',
             'ingredients',
             'allergens',
             'family',
-            'creator',
         ])
             ->where('share_token', $token)
             ->first();

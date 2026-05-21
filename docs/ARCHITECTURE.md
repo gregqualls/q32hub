@@ -71,6 +71,23 @@
 **Reasoning:** Not everyone wants or can afford AI features. For open-source users, this should be optional. For Greg, it's a core feature.
 **Implementation:** `config('kinhold.chatbot.enabled')` checks for API key presence. Frontend conditionally shows chat tab. Backend returns 503 if chatbot is called without a key.
 
+### DEC-013: Severe-Stakes Allergen System (v1.10.0)
+**Date:** 2026-05-21
+**Decision:** Treat the allergen feature as safety-critical (anaphylaxis-grade), not as a soft dietary preference. Build it with conservative defaults that fail open toward "show too much" rather than "silently mark unsafe recipes safe."
+**Reasoning:** Kinhold's targeted use case includes children with life-threatening allergies. The user briefing explicitly called out that this is the first feature in the app where a bug could plausibly hurt a child. The whole feature design follows from that constraint.
+**Key invariants enforced by the code:**
+- Members with `allergen_profile_reviewed_at = null` are NEVER used by the `safe_for_members` filter or the meal-planner safety blocker. False-safe filtering is treated as worse than no filtering. Tests in `AllergenFilteringTest` lock this.
+- `acknowledge_allergens` is a request-time flag, never a profile-level setting. Bypassing the planner guard requires an explicit per-action acknowledgement and the API returns 409 + structured `hits[]` otherwise.
+- AI-tagged allergens land with `source = ai_auto` or `ai_suggested`. The recipe detail view renders them as visually distinct "unconfirmed" badges (dashed outline + reduced opacity) until a parent one-click confirms. The planner safety blocker treats them as real allergens regardless.
+- Mass-assignment hardening: `allergen_profile_reviewed_at`, `share_token`, and `share_visible_attribution` are NOT in `$fillable`. Only controllers that own the contract use `forceFill`. Prevents a future `User::update($request->all())` from silently marking a profile reviewed.
+- Public share URLs use 22-char base62 tokens (~131 bits of entropy). Revoke clears the token; re-sharing later mints a brand-new token by design (old links die permanently on revoke).
+- Backfill is parent-only, throttled at 2/day per family at the route layer, and rate-limited at 30 Anthropic calls/min per family inside the queue worker. The job takes both `recipeId` and `familyId` and asserts they match — a misconfigured dispatcher can't cross-tag.
+**Allergen storage shape:** Global Big 9 rows share `family_id = null`; family-scoped custom allergens carry the family's id. `availableToFamily()` scope returns the union. Cleanly deduplicates the Big 9 across the install and keeps "custom" semantics in one place.
+**Multi-image:** `recipes.image_path` stays as a denormalized cache of the primary image so card readers don't need a relation load; the source of truth for the gallery is `recipe_images` synced through `RecipeService::syncImages()`. Backwards-compat is structural, not a special case.
+**Public sharing renders via Blade SSR** (not Vue): the share page needs proper OG/Twitter Card meta tags for social unfurl, must be SEO-friendly and fast, and doesn't need interactivity. PWA `navigateFallbackDenylist` was updated to include `/^\/r\//` so the service worker passes share URLs straight through to the server.
+**MCP coverage:** 13 new actions in `kinhold-food` cover the entire surface (allergens, member profiles, recipe-allergen single-row edits, backfill, sharing). `recipe_list` accepts `safe_for_members[]` + `safe_for`; `meal_plan_add_entry` accepts `acknowledge_allergens` and surfaces the structured hit list on block. Matches the `api_coverage_required` rule in `.dotclaude.project.yaml`.
+**Why a dedicated Blade view instead of the SPA's recipe detail:** the public page is a different design surface (no nav, no auth, must look beautiful to non-users, must be print-friendly). Trying to reuse the SPA's detail view would have meant adding "public mode" branches throughout the SPA. A focused Blade template is smaller, faster, and easier to design without app chrome.
+
 ### DEC-012: Soft Single-Family Enforcement on Self-Hosted ([#138](https://github.com/gregqualls/kinhold/issues/138))
 **Date:** 2026-04-30
 **Decision:** Enforce the LICENSE's single-family limit via a sticky SPA banner + a `Log::warning` line on Nth-family creation. Do **not** hard-stop family creation. An internal env flag (`COMMERCIAL_LICENSE_ACKNOWLEDGED=true`) suppresses the banner — handed out privately to commercial licensees, never advertised in `.env.example`, the SPA, or self-hosting docs.

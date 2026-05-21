@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Http\Controllers\Webhooks\StripeWebhookController;
+use App\Jobs\BackfillRecipeAllergens;
 use App\Models\Family;
 use App\Models\MealPlanEntry;
 use App\Models\ShoppingItem;
@@ -62,6 +63,18 @@ class AppServiceProvider extends ServiceProvider
         // Recipe import: 20 requests per hour per family
         RateLimiter::for('recipe-import', function ($request) {
             return Limit::perHour(20)->by($request->user()?->family_id ?? $request->ip());
+        });
+
+        // Family-wide allergen backfill: cap dispatching to 2 per day per
+        // family so a parent can't burn through the AI budget by spamming.
+        RateLimiter::for('allergen-backfill-dispatch', function ($request) {
+            return Limit::perDay(2)->by($request->user()?->family_id ?? $request->ip());
+        });
+
+        // Per-job Anthropic call rate limiter — drained at 30/min per family
+        // by the queue worker even on a large backfill batch (#317).
+        RateLimiter::for('allergen-backfill', function (BackfillRecipeAllergens $job) {
+            return Limit::perMinute(30)->by('family:'.$job->familyId);
         });
 
         // ShoppingItem uses ShoppingListPolicy (non-standard naming)

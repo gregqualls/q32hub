@@ -220,7 +220,7 @@ class PublicRecipeSharingTest extends TestCase
 
         $response = $this->get('/r/allergentkn1234567890a')->assertOk();
 
-        $this->assertStringContainsString('Allergens', $response->getContent());
+        $this->assertStringContainsString('Contains', $response->getContent());
         $this->assertStringContainsString('Peanuts', $response->getContent());
     }
 

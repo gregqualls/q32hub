@@ -4,10 +4,10 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\AllergenSource;
 use App\Http\Controllers\Controller;
-use App\Jobs\BackfillRecipeAllergens;
 use App\Models\Allergen;
 use App\Models\Recipe;
 use App\Models\RecipeAllergen;
+use App\Services\RecipeImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -17,8 +17,10 @@ class RecipeAllergenController extends Controller
     /**
      * Queue an AI allergen backfill for every recipe in the caller's family that
      * has no allergen tags yet. Parent-only. Returns the count of jobs queued.
+     * Throttled at the route layer (`throttle:allergen-backfill-dispatch`); the
+     * jobs themselves are also rate-limited per family inside the worker.
      */
-    public function backfill(Request $request): JsonResponse
+    public function backfill(Request $request, RecipeImportService $service): JsonResponse
     {
         $user = $request->user();
         if (! $user->isParent()) {
@@ -26,21 +28,9 @@ class RecipeAllergenController extends Controller
         }
 
         $family = $user->currentFamily()->firstOrFail();
-
         $force = (bool) $request->input('force', false);
 
-        $recipes = Recipe::where('family_id', $family->id);
-        if (! $force) {
-            $recipes->doesntHave('allergens');
-        }
-
-        $count = 0;
-        $recipes->chunkById(100, function ($chunk) use (&$count, $force) {
-            foreach ($chunk as $recipe) {
-                BackfillRecipeAllergens::dispatch((string) $recipe->id, $force);
-                $count++;
-            }
-        });
+        $count = $service->queueAllergenBackfill((string) $family->id, $force);
 
         return response()->json([
             'queued' => $count,

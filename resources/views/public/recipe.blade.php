@@ -72,6 +72,11 @@
     <meta name="description" content="{{ $ogDescription }}">
     <meta name="theme-color" content="#1B3A4B">
 
+    {{-- Share is link-only by design. Block search engines so a link pasted in
+         a public forum doesn't get crawled and indexed beyond the recipient. --}}
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="googlebot" content="noindex, nofollow">
+
     {{-- Open Graph --}}
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="Kinhold">
