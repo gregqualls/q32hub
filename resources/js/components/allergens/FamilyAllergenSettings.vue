@@ -6,7 +6,6 @@
 import { ref, computed, onMounted } from 'vue'
 import { useAllergensStore } from '@/stores/allergens'
 import { useAuthStore } from '@/stores/auth'
-import KinChip from '@/components/design-system/KinChip.vue'
 import KinButton from '@/components/design-system/KinButton.vue'
 import KinInput from '@/components/design-system/KinInput.vue'
 import { TrashIcon, PencilSquareIcon, CheckIcon, XMarkIcon } from '@heroicons/vue/24/outline'
@@ -76,14 +75,10 @@ const remove = async (allergen) => {
 
 <template>
   <div class="space-y-5">
-    <div>
-      <p class="text-xs font-medium text-ink-secondary mb-2">Big 9 (always available)</p>
-      <div class="flex flex-wrap gap-2">
-        <KinChip v-for="a in allergens.bigNine" :key="a.id" variant="category" color="neutral">
-          {{ a.name }}
-        </KinChip>
-      </div>
-    </div>
+    <p class="text-xs text-ink-secondary">
+      The Big 9 (milk, eggs, fish, shellfish, tree nuts, peanuts, wheat&nbsp;/&nbsp;gluten, soy, sesame) are
+      pre-loaded and always available. Pick them per family member in the profiles below.
+    </p>
 
     <div>
       <p class="text-xs font-medium text-ink-secondary mb-2">Your family's allergens</p>
