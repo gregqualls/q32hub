@@ -9,7 +9,7 @@ import { ref, computed, watch } from 'vue'
 import KinModalSheet from '@/components/design-system/KinModalSheet.vue'
 import KinButton from '@/components/design-system/KinButton.vue'
 import KinSwitch from '@/components/design-system/KinSwitch.vue'
-import { ShareIcon, ClipboardDocumentIcon, CheckIcon, ExclamationCircleIcon } from '@heroicons/vue/24/outline'
+import { ShareIcon, ClipboardDocumentIcon, CheckIcon, ExclamationCircleIcon, ArrowTopRightOnSquareIcon } from '@heroicons/vue/24/outline'
 import api from '@/services/api'
 import { useNotification } from '@/composables/useNotification'
 
@@ -83,15 +83,48 @@ const revoke = async () => {
   }
 }
 
+const urlInput = ref(null)
+
 const copyLink = async () => {
   if (!local.value.url) return
-  try {
-    await navigator.clipboard.writeText(local.value.url)
-    copied.value = true
-    setTimeout(() => { copied.value = false }, 2000)
-  } catch {
-    notifyError('Copy failed. Long-press the link to copy manually.')
+  const text = local.value.url
+
+  // Modern path. Rejects in sandboxed iframes / unfocused docs / strict permissions.
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      copied.value = true
+      setTimeout(() => { copied.value = false }, 2000)
+      return
+    } catch {
+      // fall through to legacy path
+    }
   }
+
+  // Legacy fallback — select the readonly input and execCommand.
+  try {
+    const el = urlInput.value
+    if (el && typeof el.select === 'function') {
+      el.focus()
+      el.select()
+      el.setSelectionRange(0, text.length)
+    }
+    const ok = document.execCommand && document.execCommand('copy')
+    if (ok) {
+      copied.value = true
+      setTimeout(() => { copied.value = false }, 2000)
+      return
+    }
+  } catch {
+    // fall through
+  }
+
+  notifyError('Copy failed. Tap the link, select all, then copy manually.')
+}
+
+const previewLink = () => {
+  if (!local.value.url) return
+  window.open(local.value.url, '_blank', 'noopener,noreferrer')
 }
 </script>
 
@@ -121,9 +154,10 @@ const copyLink = async () => {
           <p class="text-xs font-semibold uppercase tracking-wide text-ink-tertiary mb-1.5">Public URL</p>
           <div class="flex items-stretch gap-2">
             <input
+              ref="urlInput"
               :value="local.url"
               readonly
-              class="flex-1 min-w-0 px-3 py-2 text-sm font-mono rounded-lg bg-surface-sunken border border-border-subtle text-ink-secondary truncate"
+              class="flex-1 min-w-0 px-3 py-2 text-sm font-mono rounded-lg bg-surface-sunken border border-border-subtle text-ink-secondary truncate focus:outline-none focus:border-accent-lavender-bold/40 focus:ring-2 focus:ring-accent-lavender-bold/20"
               @focus="$event.target.select()"
             />
             <button
@@ -137,6 +171,14 @@ const copyLink = async () => {
               {{ copied ? 'Copied' : 'Copy' }}
             </button>
           </div>
+          <button
+            type="button"
+            class="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-ink-secondary hover:text-accent-lavender-bold transition-colors"
+            @click="previewLink"
+          >
+            <ArrowTopRightOnSquareIcon class="w-3.5 h-3.5" />
+            Preview what your family will see
+          </button>
         </div>
 
         <div class="flex items-start justify-between gap-3 p-3 rounded-lg bg-surface-sunken">
