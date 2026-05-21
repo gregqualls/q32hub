@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\V1\PointsController;
 use App\Http\Controllers\Api\V1\PushSubscriptionController;
 use App\Http\Controllers\Api\V1\RecipeAllergenController;
 use App\Http\Controllers\Api\V1\RecipeController;
+use App\Http\Controllers\Api\V1\RecipeShareController;
 use App\Http\Controllers\Api\V1\RestaurantController;
 use App\Http\Controllers\Api\V1\RewardsController;
 use App\Http\Controllers\Api\V1\SettingsController;
@@ -238,6 +239,11 @@ Route::prefix('v1')->group(function () {
 
                 // Family-wide AI allergen backfill (parent only)
                 Route::post('/allergens/backfill', [RecipeAllergenController::class, 'backfill']);
+
+                // Public sharing (parent only)
+                Route::post('/{recipe}/share', [RecipeShareController::class, 'store']);
+                Route::patch('/{recipe}/share', [RecipeShareController::class, 'update']);
+                Route::delete('/{recipe}/share', [RecipeShareController::class, 'destroy']);
             });
 
             // Allergens (module: food)

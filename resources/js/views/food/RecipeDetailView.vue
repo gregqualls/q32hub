@@ -49,6 +49,16 @@
             variant="ghost"
             size="sm"
             icon-only
+            aria-label="Share recipe"
+            @click="showShareModal = true"
+          >
+            <ShareIcon class="w-5 h-5" />
+          </KinButton>
+          <KinButton
+            v-if="isParent"
+            variant="ghost"
+            size="sm"
+            icon-only
             aria-label="Edit recipe"
             @click="showEditForm = true"
           >
@@ -249,6 +259,15 @@
       @confirm="handleDelete"
       @cancel="showDeleteConfirm = false"
     />
+
+    <!-- Share -->
+    <ShareRecipeModal
+      v-if="recipe"
+      :show="showShareModal"
+      :recipe="recipe"
+      @close="showShareModal = false"
+      @updated="onShareUpdated"
+    />
   </div>
 </template>
 
@@ -265,6 +284,7 @@ import FamilyRating from '@/components/recipes/FamilyRating.vue'
 import CookLogEntry from '@/components/recipes/CookLogEntry.vue'
 import RecipeForm from '@/components/recipes/RecipeForm.vue'
 import AllergenBadgeRow from '@/components/allergens/AllergenBadgeRow.vue'
+import ShareRecipeModal from '@/components/recipes/ShareRecipeModal.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'
@@ -281,6 +301,7 @@ import {
   FireIcon,
   LinkIcon,
   ExclamationCircleIcon,
+  ShareIcon,
 } from '@heroicons/vue/24/outline'
 import { HeartIcon as HeartIconSolid } from '@heroicons/vue/24/solid'
 
@@ -296,6 +317,7 @@ const isParent = computed(() => authStore.isParent)
 const showEditForm = ref(false)
 const showDeleteConfirm = ref(false)
 const showCookLogModal = ref(false)
+const showShareModal = ref(false)
 const cookLogs = ref([])
 const ratings = ref([])
 const heroOverride = ref(null)
@@ -384,6 +406,11 @@ const handleToggleFavorite = async () => {
 const onConfirmAllergen = async (row) => {
   const result = await recipesStore.confirmAllergen(recipe.value.id, row.pivot_id)
   if (!result.success) notifyError(result.error)
+}
+
+const onShareUpdated = (share) => {
+  // Mutate locally so the modal reads the latest state on next open without a refetch.
+  if (recipe.value) recipe.value.share = share
 }
 
 const handleRate = async (score) => {

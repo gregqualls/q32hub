@@ -97,6 +97,7 @@ export default defineConfig({
           /^\/mcp/,
           /^\/login/,
           /^\/oauth/,
+          /^\/r\//,
           /^\/sanctum/,
           /^\/storage\//,
         ],

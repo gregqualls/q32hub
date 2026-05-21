@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\GoogleAuthController;
+use App\Http\Controllers\Public\PublicRecipeController;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -44,6 +45,10 @@ Route::get('/auth/google/link-callback', [GoogleAuthController::class, 'linkCall
 // /login itself is unbound so the SPA catch-all serves the SPA login form.
 Route::get('/auth/oauth-login', [GoogleAuthController::class, 'oauthLogin'])->name('login');
 Route::get('/auth/google/oauth-callback', [GoogleAuthController::class, 'oauthCallback'])->name('google.oauth-callback');
+
+// Public recipe share — server-rendered Blade view with OG tags for social
+// unfurl. Must be declared before the SPA catch-all so it wins on `/r/...`.
+Route::get('/r/{token}', [PublicRecipeController::class, 'show'])->name('public.recipe');
 
 // SPA catch-all — exclude api/, oauth/, and .well-known/ paths
 Route::get('{any}', function () {
