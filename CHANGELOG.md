@@ -2,7 +2,7 @@
 
 > Updated at the end of every working session. Newest entries first.
 
-## 2026-05-29 — Fix stale CSRF token on long-lived mobile tabs
+## 2026-05-29 — v1.11.0: Fix stale CSRF token on long-lived mobile tabs
 
 Mobile users hit a CSRF error (419) on every write (POST/PUT/DELETE) once a backgrounded SPA tab outlived the 120-minute session. Reads kept working because GET skips CSRF verification, so the app looked fine until you tried to change something.
 
