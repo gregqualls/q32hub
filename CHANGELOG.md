@@ -2,6 +2,16 @@
 
 > Updated at the end of every working session. Newest entries first.
 
+## 2026-05-29 — Fix stale CSRF token on long-lived mobile tabs
+
+Mobile users hit a CSRF error (419) on every write (POST/PUT/DELETE) once a backgrounded SPA tab outlived the 120-minute session. Reads kept working because GET skips CSRF verification, so the app looked fine until you tried to change something.
+
+Root cause: the API client read its CSRF token from the `<meta name="csrf-token">` tag, captured once at page load. When the server session rotated its token, the SPA kept sending the stale one. Phones keep tabs frozen in the background far longer than desktop, so they bore the brunt.
+
+Fix (`resources/js/services/api.js`): read the `XSRF-TOKEN` cookie Sanctum keeps in sync with the session (sent as `X-XSRF-TOKEN`) instead of the frozen meta tag, and add a response interceptor that, on a 419, refreshes `/sanctum/csrf-cookie` and replays the request once. Together that removes the staleness and transparently recovers from an expired session.
+
+Also bumped vulnerable Symfony transitive deps (http-foundation, http-kernel, mailer, mime, polyfill-intl-idn, routing) to 7.4.12/7.4.13 to clear 8 advisories flagged by `composer audit`. No app code changes from the bump; all checks green.
+
 ## 2026-05-21 — v1.10.0: Allergens, multi-image recipes, public sharing ([#311](https://github.com/gregqualls/kinhold/issues/311), [#312](https://github.com/gregqualls/kinhold/issues/312))
 
 Six PRs land together as v1.10.0. Two user-visible features: sharable recipes and a severe-stakes allergen system.

@@ -9,6 +9,14 @@ const api = axios.create({
   },
 })
 
+// Read the XSRF-TOKEN cookie Sanctum keeps in sync with the session. Unlike the
+// <meta> tag (frozen at page load), this reflects the current session token, so
+// long-lived mobile tabs don't send a stale token after the session rotates.
+function xsrfTokenFromCookie() {
+  const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/)
+  return match ? decodeURIComponent(match[1]) : null
+}
+
 // Restore auth token from localStorage on init
 const savedToken = localStorage.getItem('auth_token')
 if (savedToken) {
@@ -17,9 +25,9 @@ if (savedToken) {
 
 // Request interceptor to add CSRF token and fix Content-Type for file uploads
 api.interceptors.request.use((config) => {
-  const token = document.querySelector('meta[name="csrf-token"]')?.content
+  const token = xsrfTokenFromCookie()
   if (token) {
-    config.headers['X-CSRF-TOKEN'] = token
+    config.headers['X-XSRF-TOKEN'] = token
   }
 
   // Let axios set the correct Content-Type (with boundary) for FormData
@@ -33,7 +41,19 @@ api.interceptors.request.use((config) => {
 // Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    // 419 = CSRF token mismatch (session rotated under a long-lived tab, common
+    // on mobile). Refresh the XSRF-TOKEN cookie and replay the request once.
+    if (error.response?.status === 419 && !error.config?._csrfRetried) {
+      try {
+        await axios.get('/sanctum/csrf-cookie', { withCredentials: true })
+        error.config._csrfRetried = true
+        return api.request(error.config)
+      } catch {
+        // Fall through to normal rejection if the refresh itself fails.
+      }
+    }
+
     if (error.response?.status === 401) {
       // Clear stored token on 401
       localStorage.removeItem('auth_token')
